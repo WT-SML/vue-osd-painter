@@ -6,24 +6,68 @@ class vueOsdPainter {
     const viewer = conf.viewer
     const shapes = conf.shapes
     const tools = {
-      MOVE: "MOVE", // 移动
-      RECT: "RECT", //矩形
-      POLYGON: "POLYGON", // 多边形
-      CIRCLE: "CIRCLE", // 圆
-      ELLIPSE: "ELLIPSE", // 椭圆
-      PATH: "PATH", // 路径
-      CLOSED_PATH: "CLOSED_PATH", // 封闭路径
-      LINE: "LINE", // 直线
-      ARROW_LINE: "ARROW_LINE", // 箭头直线
-      MULTISELECT: "MULTISELECT", // 多选
-      EXCLUSION: "EXCLUSION", // 排除
+      // 移动
+      MOVE: {
+        name: "MOVE",
+        status: 0,
+      },
+      //矩形
+      RECT: {
+        name: "RECT",
+        status: 0,
+      },
+      // 多边形
+      POLYGON: {
+        name: "POLYGON",
+        status: 0,
+      },
+      // 圆
+      CIRCLE: {
+        name: "CIRCLE",
+        status: 0,
+      },
+      // 椭圆
+      ELLIPSE: {
+        name: "ELLIPSE",
+        status: 0,
+      },
+      // 路径
+      PATH: {
+        name: "PATH",
+        status: 0,
+      },
+      // 封闭路径
+      CLOSED_PATH: {
+        name: "CLOSED_PATH",
+        status: 0,
+      },
+      // 直线
+      LINE: {
+        name: "LINE",
+        status: 0,
+      },
+      // 箭头直线
+      ARROW_LINE: {
+        name: "ARROW_LINE",
+        status: 0,
+      },
+      // 多选
+      MULTISELECT: {
+        name: "MULTISELECT",
+        status: 0,
+      },
+      // 排除
+      EXCLUSION: {
+        name: "EXCLUSION",
+        status: 0,
+      },
     }
     this.state = reactive({
       viewer,
       shapes,
       tools: {
         list: tools,
-        current: tools.MOVE,
+        current: tools.MOVE.name,
       },
     })
     // 挂载组件

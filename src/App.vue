@@ -77,30 +77,29 @@ onMounted(() => {
     state.viewer.viewport.zoomTo(1)
   })
 })
-
-const add = () => {
-  state.shapes.push({
-    id: 4,
-    type: "RECT",
-    meta: {
-      x: 8000,
-      y: 2000,
-      width: 2000,
-      height: 2000,
-    },
-  })
-}
-const del = () => {
-  state.shapes.pop()
-}
 </script>
 
 <template>
   <div class="container">
     <div id="osd" class="osd"></div>
-    <div class="tools">
-      <button @click="add()">新增</button>
-      <button @click="del()">删除</button>
+    <div v-if="state.painter" class="tools">
+      <div class="list">
+        <div>TOOLS：</div>
+        <label
+          v-for="item in state.painter.state.tools.list"
+          :key="item.name"
+          :for="item.name"
+          class="item"
+        >
+          <input
+            :id="item.name"
+            type="radio"
+            :value="item.name"
+            v-model="state.painter.state.tools.current"
+          />
+          {{ item.name }}
+        </label>
+      </div>
     </div>
   </div>
 </template>
@@ -118,7 +117,14 @@ const del = () => {
 .tools {
   width: 20%;
   height: 100%;
-  padding: 30px;
+  padding: 10px;
+  .list {
+    border-right: 1px #ccc solid;
+    .item {
+      display: block;
+      cursor: pointer;
+    }
+  }
 }
 </style>
 
