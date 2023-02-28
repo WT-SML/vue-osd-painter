@@ -1,11 +1,14 @@
 <script setup>
-import { onMounted, reactive, computed, onUnmounted, ref, watch } from "vue"
 import osd from "openseadragon"
+import { onMounted, reactive, computed, onUnmounted, ref, watch } from "vue"
 import { useMouseInElement, useMousePressed } from "@vueuse/core"
 
 const props = defineProps({
-  painter: Object, // 绘图器
+  viewer: Object, // osd 查看器
+  shapes: Array, // 需要渲染的形状数组
 })
+
+const emits = defineEmits(["add"])
 
 const svgRef = ref(null)
 
@@ -14,44 +17,50 @@ const {
   y: mouseY,
   isOutside: mouseIsOutside,
 } = useMouseInElement(svgRef)
-const el = ref(null)
-
-console.log(props.painter.state.viewer.canvas)
 
 const { pressed: isMousePressed } = useMousePressed({
-  target: props.painter.state.viewer.canvas,
+  target: svgRef,
 })
 
 // 监听当前工具
-watch(
-  () => props.painter.state.tools.current,
-  (newVal) => {
-    const viewer = props.painter.state.viewer
-    viewer.setMouseNavEnabled(
-      newVal === props.painter.state.tools.list.MOVE.name
-    )
-    state.tempShape = null
-    props.painter.state.tools.list[newVal].status = 0
-    // if (newVal === props.painter.state.tools.list.MOVE) {
-    //   // 移动
-    // } else if (newVal === props.painter.state.tools.list.RECT) {
-    //   // 矩形
-    // } else if (newVal === props.painter.state.tools.list.POLYGON) {
-    //   // 多边形
-    // }
-  }
-)
-// 监听鼠标位置
-// 监听鼠标按下
-watch(isMousePressed, (newVal) => {})
+// watch(
+//   () => props.painter.state.tools.current,
+//   (newVal) => {
+//     const viewer = props.painter.state.viewer
+//     viewer.setMouseNavEnabled(
+//       newVal === props.painter.state.tools.list.MOVE.name
+//     )
+//     state.tempShape = null
+//     props.painter.state.tools.list[newVal].status = 0
+//     // if (newVal === props.painter.state.tools.list.MOVE) {
+//     //   // 移动
+//     // } else if (newVal === props.painter.state.tools.list.RECT) {
+//     //   // 矩形
+//     // } else if (newVal === props.painter.state.tools.list.POLYGON) {
+//     //   // 多边形
+//     // }
+//   }
+// )
 
-const shapes = computed(() => {
-  if (state.tempShape && state.tempShape.id) {
-    return props.painter.state.shapes.filter(
-      (item) => item.id !== state.tempShape.id
-    )
+let watchMouseInfoStop = null
+// 监听鼠标按下
+watch(isMousePressed, (newVal) => {
+  if (newVal) {
+    console.log("按下")
+    watchMouseInfoStop = watch([mouseX, mouseY], ([newMouseX, newMouseY]) => {
+      console.log(newMouseX, newMouseY)
+    })
+  } else {
+    console.log("抬起")
+    watchMouseInfoStop && watchMouseInfoStop()
   }
-  return props.painter.state.shapes
+})
+
+const computedShapes = computed(() => {
+  if (state.tempShape && state.tempShape.id) {
+    return props.shapes.filter((item) => item.id !== state.tempShape.id)
+  }
+  return props.shapes
 })
 
 const state = reactive({
@@ -61,7 +70,7 @@ const state = reactive({
 
 // 监听 viewer 事件
 const listenForViewerEvents = () => {
-  const viewer = props.painter.state.viewer
+  const viewer = props.viewer
   viewer.addHandler("animation", () => updateTransform())
   viewer.addHandler("rotate", () => updateTransform())
   viewer.addHandler("resize", () => updateTransform())
@@ -70,7 +79,7 @@ const listenForViewerEvents = () => {
 
 // 获取比例
 const getScale = () => {
-  const viewer = props.painter.state.viewer
+  const viewer = props.viewer
   const containerWidth = viewer.viewport.getContainerSize().x
   const zoom = viewer.viewport.getZoom(true)
   return (zoom * containerWidth) / viewer.world.getContentFactor()
@@ -78,7 +87,7 @@ const getScale = () => {
 
 // 更新 transform
 const updateTransform = () => {
-  const viewport = props.painter.state.viewer.viewport
+  const viewport = props.viewer.viewport
   const flipped = viewport.getFlip()
   const p = viewport.pixelFromPoint(new osd.Point(0, 0), true)
   if (flipped) {
@@ -92,20 +101,22 @@ const updateTransform = () => {
 
 // 挂载
 onMounted(() => {
-  const viewer = props.painter.state.viewer
+  const viewer = props.viewer
   viewer.addHandler("open", () => {
     updateTransform()
     listenForViewerEvents()
   })
 })
 // 卸载
-onUnmounted(() => {
-  props.painter.destroy()
+onUnmounted(() => {})
+// 暴露数据
+defineExpose({
+  state,
 })
 </script>
 
 <template>
-  <div ref="el" class="temp-panel">
+  <div class="temp-panel">
     x：{{ mouseX }} <br />
     y：{{ mouseY }} <br />
     isOutside：{{ mouseIsOutside }}<br />
@@ -114,13 +125,13 @@ onUnmounted(() => {
   <svg ref="svgRef" class="painter">
     <g :transform="state.transform">
       <g
-        v-for="item in shapes"
+        v-for="item in computedShapes"
         :key="item.id"
         :data-id="item.id"
         class="shape-rect"
       >
+        <!-- v-if="item.type === painter.state.tools.list.RECT.name" -->
         <rect
-          v-if="item.type === painter.state.tools.list.RECT"
           :x="item.meta.x"
           :y="item.meta.y"
           :width="item.meta.width"
@@ -137,9 +148,10 @@ onUnmounted(() => {
   top: 0;
   right: 0;
   border: 1px solid #ccc;
-  background-color: #f00;
+  background-color: #ddd;
   padding: 10px;
   z-index: 999;
+  width: 200px;
 }
 .painter {
   position: absolute;

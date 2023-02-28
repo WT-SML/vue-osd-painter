@@ -1,11 +1,11 @@
 <script setup>
 import osd from "openseadragon"
-import { onMounted, reactive } from "vue"
-import vueOsdPainter from "./components"
+import { nextTick, onMounted, reactive } from "vue"
+import initPainter from "./components/vue-osd-painter"
 
 const state = reactive({
   viewer: null, // osd 查看器
-  painter: null, // 绘制器
+  painter: null, // 画家对象
   // 绘制的图形
   shapes: [
     {
@@ -41,12 +41,12 @@ const state = reactive({
   ],
 })
 
-onMounted(() => {
+onMounted(async () => {
   const osdConf = {
     id: "osd", // 容器 dom Id
     tileSources:
-      // "http://openseadragon.github.io/example-images/duomo/duomo.dzi", // 瓦片源
-      "http://192.168.100.147/image/yice-dev/1623950836958834688.sdpc.dzi", // 瓦片源
+      "http://openseadragon.github.io/example-images/duomo/duomo.dzi", // 瓦片源
+    // "http://192.168.100.147/image/yice-dev/1623950836958834688.sdpc.dzi", // 瓦片源
     showNavigator: true, // 显示小地图
     navigatorPosition: "TOP_LEFT", // 设置缩略图的位置
     showNavigationControl: false, // 设置为false以防止出现默认导航控件。 注意，如果设置为false，由选项zoomInButton、zoomOutButton等设置的自定义按钮将呈现为非活动状态。
@@ -68,21 +68,27 @@ onMounted(() => {
     minScrollDeltaTime: 50, // 画布滚动事件之间的毫秒数。此值有助于标准化不同设备之间的画布滚动事件的速率，从而使速度较快的设备减速到足以使缩放控制更易于管理。
   }
   state.viewer = new osd.Viewer(osdConf)
-  const painterConf = {
-    viewer: state.viewer, // osd 查看器
-    shapes: state.shapes, // 需要渲染的图形
-  }
-  state.painter = new vueOsdPainter(painterConf)
   state.viewer.addHandler("open", () => {
     state.viewer.viewport.zoomTo(1)
   })
+  // 秉承 vue 的思想，配置应该是响应式的数据，起码，最基本的 shapes（要渲染的形状数组） 应该是响应式的，如此一来，你可以直接操作 shapes 数组，进而画布上的形状会随之更新
+  const painterConf = {
+    viewer: state.viewer, // osd 查看器
+    shapes: state.shapes, // 需要渲染的图形
+    onAdd: (e) => {},
+  }
+  state.painter = initPainter(painterConf)
+  await nextTick()
+  console.log(state.painter)
+  console.log(state.painter.$props)
+  console.log(state.painter.$setup)
 })
 </script>
 
 <template>
   <div class="container">
     <div id="osd" class="osd"></div>
-    <div v-if="state.painter" class="tools">
+    <!-- <div v-if="state.painter" class="tools">
       <div class="list">
         <div>TOOLS：</div>
         <label
@@ -100,7 +106,7 @@ onMounted(() => {
           {{ item.name }}
         </label>
       </div>
-    </div>
+    </div> -->
   </div>
 </template>
 
