@@ -1,6 +1,14 @@
 <script setup>
 import osd from "openseadragon"
-import { onMounted, reactive, computed, onUnmounted, ref, watch } from "vue"
+import {
+  onMounted,
+  reactive,
+  computed,
+  onUnmounted,
+  ref,
+  watch,
+  getCurrentInstance,
+} from "vue"
 import { useMouseInElement, useMousePressed } from "@vueuse/core"
 
 const props = defineProps({
@@ -10,7 +18,10 @@ const props = defineProps({
 
 const emits = defineEmits(["add"])
 
+const { proxy } = getCurrentInstance()
+
 const svgRef = ref(null)
+const svgRootGroupRef = ref(null)
 
 const {
   x: mouseX,
@@ -18,54 +29,71 @@ const {
   isOutside: mouseIsOutside,
 } = useMouseInElement(svgRef)
 
-const { pressed: isMousePressed } = useMousePressed({
-  target: svgRef,
+const { pressed: isMousePressed } = useMousePressed()
+const tools = {
+  MOVE: "MOVE",
+  RECT: "RECT",
+  POLYGON: "POLYGON",
+  CIRCLE: "CIRCLE",
+  ELLIPSE: "ELLIPSE",
+  PATH: "PATH",
+  CLOSED_PATH: "CLOSED_PATH",
+  LINE: "LINE",
+  ARROW_LINE: "ARROW_LINE",
+  MULTISELECT: "MULTISELECT",
+  EXCLUSION: "EXCLUSION",
+}
+
+const state = reactive({
+  transform: "", // svg 的定位
+  tempShape: null, // 新增和编辑时的临时shape
+  tools, // 支持的工具
+  mode: tools.MOVE, // 绘图模式
+  c: {x:0,y:0},
 })
-
-// 监听当前工具
-// watch(
-//   () => props.painter.state.tools.current,
-//   (newVal) => {
-//     const viewer = props.painter.state.viewer
-//     viewer.setMouseNavEnabled(
-//       newVal === props.painter.state.tools.list.MOVE.name
-//     )
-//     state.tempShape = null
-//     props.painter.state.tools.list[newVal].status = 0
-//     // if (newVal === props.painter.state.tools.list.MOVE) {
-//     //   // 移动
-//     // } else if (newVal === props.painter.state.tools.list.RECT) {
-//     //   // 矩形
-//     // } else if (newVal === props.painter.state.tools.list.POLYGON) {
-//     //   // 多边形
-//     // }
-//   }
-// )
-
-let watchMouseInfoStop = null
+// 监听绘图模式
+watch(
+  () => state.mode,
+  (newVal) => {
+    state.tempShape = null
+    props.viewer.setMouseNavEnabled(newVal === state.tools.MOVE)
+  }
+)
 // 监听鼠标按下
 watch(isMousePressed, (newVal) => {
   if (newVal) {
     console.log("按下")
-    watchMouseInfoStop = watch([mouseX, mouseY], ([newMouseX, newMouseY]) => {
-      console.log(newMouseX, newMouseY)
-    })
   } else {
     console.log("抬起")
-    watchMouseInfoStop && watchMouseInfoStop()
   }
 })
+// 监听鼠标位置
+watch([mouseX, mouseY], () => {
+  state.c=(dziCoordByMouse.value)
 
+  // const pt = svgRef.value.createSVGPoint()
+  // pt.x = mouseX.value
+  // pt.y = mouseY.value
+  // state.c.push(
+  //   pt.matrixTransform(svgRootGroupRef.value.getScreenCTM().inverse())
+  // )
+  // const d = `M0 0 ${state.c.map((item) => `L${item.x} ${item.y} `)}`
+  // test.value.setAttribute("d", d)
+})
+
+// 鼠标实时的画布坐标
+const dziCoordByMouse = computed(() =>
+  props.viewer.viewport.viewerElementToImageCoordinates(
+    new osd.Point(mouseX.value, mouseY.value)
+  )
+)
+
+// 实际渲染的shapes，比如编辑中的shape会单独渲染，不作为常规shape渲染
 const computedShapes = computed(() => {
   if (state.tempShape && state.tempShape.id) {
     return props.shapes.filter((item) => item.id !== state.tempShape.id)
   }
   return props.shapes
-})
-
-const state = reactive({
-  transform: "", // svg 的定位
-  tempShape: null, // 新增和编辑时的临时shape
 })
 
 // 监听 viewer 事件
@@ -101,11 +129,8 @@ const updateTransform = () => {
 
 // 挂载
 onMounted(() => {
-  const viewer = props.viewer
-  viewer.addHandler("open", () => {
-    updateTransform()
-    listenForViewerEvents()
-  })
+  updateTransform()
+  listenForViewerEvents()
 })
 // 卸载
 onUnmounted(() => {})
@@ -120,10 +145,10 @@ defineExpose({
     x：{{ mouseX }} <br />
     y：{{ mouseY }} <br />
     isOutside：{{ mouseIsOutside }}<br />
-    isMousePressed：{{ isMousePressed }}
+    isMousePressed：{{ isMousePressed }} dziCoordByMouse：{{ dziCoordByMouse }}
   </div>
   <svg ref="svgRef" class="painter">
-    <g :transform="state.transform">
+    <g ref="svgRootGroupRef" :transform="state.transform">
       <g
         v-for="item in computedShapes"
         :key="item.id"
@@ -136,6 +161,19 @@ defineExpose({
           :y="item.meta.y"
           :width="item.meta.width"
           :height="item.meta.height"
+        ></rect>
+      </g>
+      <g>
+        <!-- <rect
+          class="shape-path"
+          :d="`M0 0 ${state.c.map((item) => `L${item.x} ${item.y} `)}`"
+        ></rect> -->
+        <rect
+        class="shape-rect"
+          :x="0"
+          :y="0"
+          :width="state.c.x"
+          :height="state.c.y"
         ></rect>
       </g>
     </g>
@@ -167,10 +205,15 @@ defineExpose({
   polygon,
   line {
     vector-effect: non-scaling-stroke;
-    cursor: pointer;
   }
   // 矩形
   .shape-rect {
+    fill: rgba(255, 0, 0, 0);
+    stroke: #f00;
+    stroke-width: 2px;
+  }
+  // 路径
+  .shape-path {
     fill: rgba(255, 0, 0, 0);
     stroke: #f00;
     stroke-width: 2px;

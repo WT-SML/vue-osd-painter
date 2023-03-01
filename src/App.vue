@@ -1,6 +1,6 @@
 <script setup>
 import osd from "openseadragon"
-import { nextTick, onMounted, reactive } from "vue"
+import { onMounted, reactive } from "vue"
 import initPainter from "./components/vue-osd-painter"
 
 const state = reactive({
@@ -69,44 +69,44 @@ onMounted(async () => {
   }
   state.viewer = new osd.Viewer(osdConf)
   state.viewer.addHandler("open", () => {
+    // 初始化为 1 倍
     state.viewer.viewport.zoomTo(1)
+    // 秉承 vue 的思想，painter 的配置应该是响应式的数据，起码，最基本的 shapes（要渲染的形状数组） 应该是响应式的，如此一来，你可以直接操作 shapes 数组，进而画布上的形状会随之更新
+    const painterConf = {
+      viewer: state.viewer, // osd 查看器
+      shapes: state.shapes, // 需要渲染的图形
+      onAdd: (e) => {},
+      onRemove: (e) => {},
+      onUpdate: (e) => {},
+    }
+    // 返回的 painter 是该 vue 组件的组件实例，你可以访问该组件实例上的 props、refs 等属性，当然，我也把该组件的 state 暴露给了你，以供你灵活的进行开发
+    state.painter = initPainter(painterConf)
   })
-  // 秉承 vue 的思想，配置应该是响应式的数据，起码，最基本的 shapes（要渲染的形状数组） 应该是响应式的，如此一来，你可以直接操作 shapes 数组，进而画布上的形状会随之更新
-  const painterConf = {
-    viewer: state.viewer, // osd 查看器
-    shapes: state.shapes, // 需要渲染的图形
-    onAdd: (e) => {},
-  }
-  state.painter = initPainter(painterConf)
-  await nextTick()
-  console.log(state.painter)
-  console.log(state.painter.$props)
-  console.log(state.painter.$setup)
 })
 </script>
 
 <template>
   <div class="container">
     <div id="osd" class="osd"></div>
-    <!-- <div v-if="state.painter" class="tools">
+    <div v-if="state.painter" class="tools">
       <div class="list">
         <div>TOOLS：</div>
         <label
-          v-for="item in state.painter.state.tools.list"
-          :key="item.name"
-          :for="item.name"
+          v-for="(v, k) in state.painter.state.tools"
+          :key="k"
+          :for="k"
           class="item"
         >
           <input
-            :id="item.name"
+            :id="k"
             type="radio"
-            :value="item.name"
-            v-model="state.painter.state.tools.current"
+            :value="k"
+            v-model="state.painter.state.mode"
           />
-          {{ item.name }}
+          {{ k }}
         </label>
       </div>
-    </div> -->
+    </div>
   </div>
 </template>
 
@@ -144,5 +144,6 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  background-color: #eee;
 }
 </style>
