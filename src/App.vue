@@ -7,46 +7,15 @@ const state = reactive({
   viewer: null, // osd 查看器
   painter: null, // 画家对象
   // 绘制的图形
-  shapes: [
-    {
-      id: 1,
-      type: "RECT",
-      meta: {
-        x: 2000,
-        y: 2000,
-        width: 2000,
-        height: 2000,
-      },
-    },
-    {
-      id: 2,
-      type: "RECT",
-      meta: {
-        x: 4000,
-        y: 4000,
-        width: 2000,
-        height: 2000,
-      },
-    },
-    {
-      id: 3,
-      type: "RECT",
-      meta: {
-        x: 6000,
-        y: 6000,
-        width: 2000,
-        height: 2000,
-      },
-    },
-  ],
+  shapes: [],
 })
 
 onMounted(async () => {
   const osdConf = {
     id: "osd", // 容器 dom Id
     tileSources:
-      "http://openseadragon.github.io/example-images/duomo/duomo.dzi", // 瓦片源
-    // "http://192.168.100.147/image/yice-dev/1623950836958834688.sdpc.dzi", // 瓦片源
+      // "http://openseadragon.github.io/example-images/duomo/duomo.dzi", // 瓦片源
+      "http://192.168.100.147/image/yice-dev/1623950836958834688.sdpc.dzi", // 瓦片源
     showNavigator: true, // 显示小地图
     navigatorPosition: "TOP_LEFT", // 设置缩略图的位置
     showNavigationControl: false, // 设置为false以防止出现默认导航控件。 注意，如果设置为false，由选项zoomInButton、zoomOutButton等设置的自定义按钮将呈现为非活动状态。
@@ -74,10 +43,23 @@ onMounted(async () => {
     // 秉承 vue 的思想，painter 的配置应该是响应式的数据，起码，最基本的 shapes（要渲染的形状数组） 应该是响应式的，如此一来，你可以直接操作 shapes 数组，进而画布上的形状会随之更新
     const painterConf = {
       viewer: state.viewer, // osd 查看器
-      shapes: state.shapes, // 需要渲染的图形
-      onAdd: (e) => {},
-      onRemove: (e) => {},
-      onUpdate: (e) => {},
+      shapes: state.shapes, // 需要渲染的形状
+      // 监听新增形状
+      onAdd: (shape) => {
+        state.shapes.push(shape)
+      },
+      // 监听删除形状
+      onRemove: (shape) => {
+        state.shapes = state.shapes.filter((item) => item.id !== shape.id)
+      },
+      // 监听更新形状
+      onUpdate: (shape) => {
+        for (const k of state.shapes) {
+          if (state.shapes[k].id === shape.id) {
+            state.shapes[k] = shape
+          }
+        }
+      },
     }
     // 返回的 painter 是该 vue 组件的组件实例，你可以访问该组件实例上的 props、refs 等属性，当然，我也把该组件的 state 暴露给了你，以供你灵活的进行开发
     state.painter = initPainter(painterConf)
