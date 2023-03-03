@@ -10,6 +10,7 @@ import {
   getCurrentInstance,
 } from "vue"
 import { useMouseInElement, useMousePressed } from "@vueuse/core"
+import { lineAngle, pointRotate } from "geometric"
 
 const props = defineProps({
   viewer: Object, // osd 查看器
@@ -29,7 +30,8 @@ const {
   isOutside: isMouseOutside,
 } = useMouseInElement(svgRef)
 
-const { pressed: isMousePressed } = useMousePressed()
+const { pressed: isMousePressed, sourceType: mouseSourceType } =
+  useMousePressed()
 
 const tools = {
   MOVE: "MOVE", // 移动
@@ -566,7 +568,24 @@ const getDistanceBetweenTwoPoints = (pointA, pointB) =>
   Math.sqrt(Math.pow(pointA.x - pointB.x, 2) + Math.pow(pointA.y - pointB.y, 2))
 
 // 获取箭头的path
-const getArrowPath = (shape) => {}
+const getArrowPath = (shape) => {
+  const startPoint = [shape.meta.x1, shape.meta.y1]
+  const endPoint = [shape.meta.x2, shape.meta.y2]
+  const angle = lineAngle([startPoint, endPoint])
+  const referencePoint = [endPoint[0], endPoint[1] + 10]
+  console.log(startPoint)
+  console.log(endPoint)
+  console.log(angle)
+  console.log(referencePoint)
+  const pointA = pointRotate(referencePoint, angle + 90 + 30, endPoint)
+  const pointB = pointRotate(referencePoint, angle + 90 - 30, endPoint)
+  return `M${pointA[0]} ${pointA[1]} L${endPoint[0]} ${endPoint[1]} L${pointB[0]} ${pointB[1]}`
+}
+
+// 处理右键菜单
+const handleContextmenu = (e) => {
+  e.preventDefault()
+}
 
 // 挂载
 onMounted(() => {
@@ -589,9 +608,10 @@ defineExpose({
     y：{{ mouseY }} <br />
     isOutside：{{ isMouseOutside }}<br />
     isMousePressed：{{ isMousePressed }} <br />
+    mouseSourceType：{{ mouseSourceType }} <br />
     dziCoordByMouse：{{ dziCoordByMouse }}
   </div>
-  <svg ref="svgRef" class="painter">
+  <svg ref="svgRef" class="painter" @contextmenu="handleContextmenu">
     <g ref="svgRootGroupRef" :transform="state.transform">
       <!-- 普通形状 -->
       <g
@@ -666,7 +686,6 @@ defineExpose({
             :x2="item.meta.x2"
             :y2="item.meta.y2"
           ></line>
-          <!-- TODO:附属箭头 -->
           <path
             class="ARROW_LINE_APPENDAGE_ARROW"
             :d="getArrowPath(item)"
@@ -696,12 +715,21 @@ defineExpose({
           :height="state.tempShape.meta.height"
         ></rect>
         <!-- 多边形 -->
-        <polygon
-          v-if="state.tempShape.type === state.tools.POLYGON"
-          :class="state.tempShape.type"
-          :points="state.tempShape.meta.points.map((pt) => `${pt.x},${pt.y} `)"
-        ></polygon>
-        <!-- TODO:多边形闭合锚点 -->
+        <template v-if="state.tempShape.type === state.tools.POLYGON">
+          <polygon
+            :class="state.tempShape.type"
+            :points="
+              state.tempShape.meta.points.map((pt) => `${pt.x},${pt.y} `)
+            "
+          ></polygon>
+          <circle
+            class="POLYGON_APPENDAGE_ANCHOR"
+            :cx="state.tempShape.meta.points[0].x"
+            :cy="state.tempShape.meta.points[0].y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${state.tempShape.meta.points[0].x} ${state.tempShape.meta.points[0].y}`"
+          ></circle>
+        </template>
         <!-- 圆 -->
         <ellipse
           v-if="state.tempShape.type === state.tools.CIRCLE"
@@ -750,15 +778,22 @@ defineExpose({
           :y2="state.tempShape.meta.y2"
         ></line>
         <!-- 箭头直线 -->
-        <line
-          v-if="state.tempShape.type === state.tools.ARROW_LINE"
-          :class="state.tempShape.type"
-          :x1="state.tempShape.meta.x1"
-          :y1="state.tempShape.meta.y1"
-          :x2="state.tempShape.meta.x2"
-          :y2="state.tempShape.meta.y2"
-        ></line>
-        <!-- TODO:箭头 -->
+        <template v-if="state.tempShape.type === state.tools.ARROW_LINE">
+          <line
+            v-if="state.tempShape.type === state.tools.ARROW_LINE"
+            :class="state.tempShape.type"
+            :x1="state.tempShape.meta.x1"
+            :y1="state.tempShape.meta.y1"
+            :x2="state.tempShape.meta.x2"
+            :y2="state.tempShape.meta.y2"
+          ></line>
+          <path
+            class="ARROW_LINE_APPENDAGE_ARROW"
+            :d="getArrowPath(state.tempShape)"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${state.tempShape.meta.x2} ${state.tempShape.meta.y2}`"
+          ></path>
+        </template>
         <!-- 点 -->
         <circle
           v-if="state.tempShape.type === state.tools.POINT"
@@ -882,7 +917,14 @@ defineExpose({
       stroke: #f00;
       stroke-width: 2px;
     }
+    // 附属箭头
+    .ARROW_LINE_APPENDAGE_ARROW {
+      stroke: #f00;
+      stroke-width: 2px;
+      fill: none;
+    }
   }
+
   // 点
   .POINT_GROUP {
     .POINT {
@@ -905,6 +947,13 @@ defineExpose({
       fill: none;
       stroke: #f00;
       stroke-width: 2px;
+    }
+    // 附属锚点
+    .POLYGON_APPENDAGE_ANCHOR {
+      fill: rgba(255, 255, 255, 1);
+      stroke: #f00;
+      stroke-width: 2px;
+      r: 6;
     }
     // 圆
     .CIRCLE {
@@ -939,6 +988,12 @@ defineExpose({
     .ARROW_LINE {
       stroke: #f00;
       stroke-width: 2px;
+    }
+    // 附属箭头
+    .ARROW_LINE_APPENDAGE_ARROW {
+      stroke: #f00;
+      stroke-width: 2px;
+      fill: none;
     }
     // 点
     .POINT {

@@ -7,6 +7,7 @@ specifiers:
   '@vueuse/core': ^9.12.0
   eslint: ^8.22.0
   eslint-plugin-vue: ^9.3.0
+  geometric: ^2.5.0
   openseadragon: ^4.0.0
   prettier: ^2.7.1
   sass: ^1.58.1
@@ -15,6 +16,7 @@ specifiers:
 
 dependencies:
   '@vueuse/core': registry.npmmirror.com/@vueuse/core/9.12.0_vue@3.2.47
+  geometric: registry.npmmirror.com/geometric/2.5.0
   openseadragon: registry.npmmirror.com/openseadragon/4.0.0
   vue: registry.npmmirror.com/vue/3.2.47
 
@@ -1063,6 +1065,12 @@ packages:
     name: function-bind
     version: 1.1.1
     dev: true
+
+  registry.npmmirror.com/geometric/2.5.0:
+    resolution: {integrity: sha512-lesHX2IgvIJtXz7EU9uq/KZxROWIRTEIRb08H3mg+TT4GT90XzNBKbNVtxK7pxn7RFd4wLyzI8AjkVleYdvQlQ==, registry: https://registry.npm.taobao.org/, tarball: https://registry.npmmirror.com/geometric/-/geometric-2.5.0.tgz}
+    name: geometric
+    version: 2.5.0
+    dev: false
 
   registry.npmmirror.com/glob-parent/5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==, registry: https://registry.npm.taobao.org/, tarball: https://registry.npmmirror.com/glob-parent/-/glob-parent-5.1.2.tgz}
