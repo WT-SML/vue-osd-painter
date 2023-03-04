@@ -10,7 +10,8 @@ import {
   getCurrentInstance,
 } from "vue"
 import { useMouseInElement, useMousePressed } from "@vueuse/core"
-import { lineAngle, pointRotate } from "geometric"
+import { lineAngle, pointRotate, pointInPolygon, lineLength } from "geometric"
+import RBush from "rbush"
 
 const props = defineProps({
   viewer: Object, // osd 查看器
@@ -18,8 +19,6 @@ const props = defineProps({
 })
 
 const emits = defineEmits(["add", "remove", "update"])
-
-const { proxy } = getCurrentInstance()
 
 const svgRef = ref(null)
 const svgRootGroupRef = ref(null)
@@ -33,6 +32,338 @@ const {
 const { pressed: isMousePressed, sourceType: mouseSourceType } =
   useMousePressed()
 
+// 初始化形状边界数组
+const shapesBounds = new RBush()
+// 获取形状边界
+const getBounds = (shape) => {
+  return shapeTypeGetBoundsFuncMap[shape.type](shape)
+}
+const getPolygonBounds = (points) => {
+  const xMap = points.map((item) => item.x)
+  const yMap = points.map((item) => item.y)
+  return {
+    minX: Math.min(...xMap),
+    minY: Math.min(...yMap),
+    maxX: Math.max(...xMap),
+    maxY: Math.max(...yMap),
+  }
+}
+const shapeTypeGetBoundsFuncMap = {
+  // 移动
+  MOVE: (shape) => {},
+  // 矩形
+  RECT: (shape) => {
+    return {
+      minX: shape.meta.x,
+      minY: shape.meta.y,
+      maxX: shape.meta.x + shape.meta.width,
+      maxY: shape.meta.y + shape.meta.height,
+      id: shape.id,
+    }
+  },
+  // 多边形
+  POLYGON: (shape) => {
+    return {
+      ...getPolygonBounds(shape.meta.points),
+      id: shape.id,
+    }
+  },
+  // 圆
+  CIRCLE: (shape) => {
+    return {
+      minX: shape.meta.cx - shape.meta.rx,
+      minY: shape.meta.cy - shape.meta.ry,
+      maxX: shape.meta.cx + shape.meta.rx,
+      maxY: shape.meta.cy + shape.meta.ry,
+      id: shape.id,
+    }
+  },
+  // 椭圆
+  ELLIPSE: (shape) => {
+    return {
+      minX: shape.meta.cx - shape.meta.rx,
+      minY: shape.meta.cy - shape.meta.ry,
+      maxX: shape.meta.cx + shape.meta.rx,
+      maxY: shape.meta.cy + shape.meta.ry,
+      id: shape.id,
+    }
+  },
+  // 路径
+  PATH: (shape) => {
+    return {
+      ...getPolygonBounds(shape.meta.d),
+      id: shape.id,
+    }
+  },
+  // 闭合路径
+  CLOSED_PATH: (shape) => {
+    return {
+      ...getPolygonBounds(shape.meta.d),
+      id: shape.id,
+    }
+  },
+  // 直线
+  LINE: (shape) => {
+    return {
+      minX: Math.min(shape.meta.x1, shape.meta.x2),
+      minY: Math.min(shape.meta.y1, shape.meta.y2),
+      maxX: Math.max(shape.meta.x1, shape.meta.x2),
+      maxY: Math.max(shape.meta.y1, shape.meta.y2),
+      id: shape.id,
+    }
+  },
+  // 箭头直线
+  ARROW_LINE: (shape) => {
+    return {
+      minX: Math.min(shape.meta.x1, shape.meta.x2),
+      minY: Math.min(shape.meta.y1, shape.meta.y2),
+      maxX: Math.max(shape.meta.x1, shape.meta.x2),
+      maxY: Math.max(shape.meta.y1, shape.meta.y2),
+      id: shape.id,
+    }
+  },
+  // 点
+  POINT: (shape) => {
+    return {
+      minX: shape.meta.cx,
+      minY: shape.meta.cy,
+      maxX: shape.meta.cx,
+      maxY: shape.meta.cy,
+      id: shape.id,
+    }
+  },
+  // 多选
+  MULTISELECT: (shape) => {},
+  // 排除
+  EXCLUSION: (shape) => {},
+}
+const initShapesBounds = () => {
+  shapesBounds.load(props.shapes.map((shape) => getBounds(shape)))
+}
+initShapesBounds()
+// 多边形工具下距离初始点过近
+const isPolygonToolToStartPointTooClose = computed(() => {
+  if (!state.tempShape) {
+    return false
+  }
+  if (state.tempShape.type !== state.tools.POLYGON) {
+    return false
+  }
+  return (
+    lineLength(
+      [state.tempShape.meta.points[0].x, state.tempShape.meta.points[0].y],
+      [dziCoordByMouse.value.x, dziCoordByMouse.value.y]
+    ) <
+    14 / state.scale
+  )
+})
+const hoverShape = computed(() => {
+  if (state.mode !== state.tools.MOVE) {
+    return null
+  }
+  if (isMouseOutside.value) {
+    return null
+  }
+  const scale = state.scale
+  const buffer = scale ? 5 / scale : 5
+  const { x, y } = dziCoordByMouse.value
+  const mouseBounds = {
+    minX: x - buffer,
+    minY: y - buffer,
+    maxX: x + buffer,
+    maxY: y + buffer,
+  }
+  // 外接矩形的粗略命中
+  const cursoryHitBounds = state.shapesBounds.search(mouseBounds)
+  // 详细的命中
+  const detailedHitBounds = cursoryHitBounds.filter((bounds) => {
+    const shape = props.shapes.filter((item) => item.id === bounds.id)[0]
+    if (shape.type === state.tools.POINT) {
+      return true
+    }
+    return pointInShape({ x, y }, shape, buffer)
+  })
+  // 返回详细命中中的面积最小的那一个
+  if (detailedHitBounds.length) {
+    if (detailedHitBounds.length === 1) {
+      return props.shapes.filter(
+        (item) => item.id === detailedHitBounds[0].id
+      )[0]
+    }
+    detailedHitBounds.sort((a, b) => {
+      const shapeA = props.shapes.filter((item) => item.id === a.id)[0]
+      const shapeB = props.shapes.filter((item) => item.id === b.id)[0]
+      return getShapeArea(shapeA) - getShapeArea(shapeB)
+    })
+    return props.shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
+  }
+  return null
+})
+// 获取shape的面积
+const getShapeArea = (shape) => {
+  return shapeTypeGetShapeAreaFuncMap[shape.type](shape)
+}
+const shapeTypeGetShapeAreaFuncMap = {
+  // 移动
+  MOVE: (shape) => {},
+  // 矩形
+  RECT: (shape) => {
+    return shape.meta.width * shape.meta.height
+  },
+  // 多边形
+  POLYGON: (shape) => {
+    let area = 0
+    const points = shape.meta.points
+    let j = points.length - 1
+
+    for (let i = 0; i < points.length; i++) {
+      area += (points[j].x + points[i].x) * (points[j].y - points[i].y)
+      j = i
+    }
+    return Math.abs(0.5 * area)
+  },
+  // 圆
+  CIRCLE: (shape) => {
+    return shape.meta.rx * shape.meta.ry * Math.PI
+  },
+  // 椭圆
+  ELLIPSE: (shape) => {
+    return shape.meta.rx * shape.meta.ry * Math.PI
+  },
+  // 路径
+  PATH: (shape) => {
+    let area = 0
+    const points = shape.meta.d
+    let j = points.length - 1
+
+    for (let i = 0; i < points.length; i++) {
+      area += (points[j].x + points[i].x) * (points[j].y - points[i].y)
+      j = i
+    }
+    return Math.abs(0.5 * area)
+  },
+  // 闭合路径
+  CLOSED_PATH: (shape) => {
+    let area = 0
+    const points = shape.meta.d
+    let j = points.length - 1
+
+    for (let i = 0; i < points.length; i++) {
+      area += (points[j].x + points[i].x) * (points[j].y - points[i].y)
+      j = i
+    }
+    return Math.abs(0.5 * area)
+  },
+  // 直线
+  LINE: (shape) => {
+    return 0
+  },
+  // 箭头直线
+  ARROW_LINE: (shape) => {
+    return 0
+  },
+  // 点
+  POINT: (shape) => {
+    return -1
+  },
+  // 多选
+  MULTISELECT: (shape) => {},
+  // 排除
+  EXCLUSION: (shape) => {},
+}
+// 点是否在shape内
+const pointInShape = (point, shape, buffer) => {
+  return shapeTypePointInShapeFuncMap[shape.type](point, shape, buffer)
+}
+const shapeTypePointInShapeFuncMap = {
+  // 移动
+  MOVE: (point, shape, buffer) => {},
+  // 矩形
+  RECT: (point, shape, buffer) => {
+    return (
+      point.x >= shape.meta.x &&
+      point.x <= shape.meta.x + shape.meta.width &&
+      point.y >= shape.meta.y &&
+      point.y <= shape.meta.y + shape.meta.height
+    )
+  },
+  // 多边形
+  POLYGON: (point, shape, buffer) => {
+    return pointInPolygon(
+      [point.x, point.y],
+      shape.meta.points.map((item) => [item.x, item.y])
+    )
+  },
+  // 圆
+  CIRCLE: (point, shape, buffer, rotation = 0) => {
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const dx = point.x - shape.meta.cx
+    const dy = point.y - shape.meta.cy
+    const tdx = cos * dx + sin * dy
+    const tdy = sin * dx - cos * dy
+    return (
+      (tdx * tdx) / (shape.meta.rx * shape.meta.rx) +
+        (tdy * tdy) / (shape.meta.ry * shape.meta.ry) <=
+      1
+    )
+  },
+  // 椭圆
+  ELLIPSE: (point, shape, buffer, rotation = 0) => {
+    const cos = Math.cos(rotation)
+    const sin = Math.sin(rotation)
+    const dx = point.x - shape.meta.cx
+    const dy = point.y - shape.meta.cy
+    const tdx = cos * dx + sin * dy
+    const tdy = sin * dx - cos * dy
+    return (
+      (tdx * tdx) / (shape.meta.rx * shape.meta.rx) +
+        (tdy * tdy) / (shape.meta.ry * shape.meta.ry) <=
+      1
+    )
+  },
+  // 路径
+  PATH: (point, shape, buffer) => {
+    return pointInPolygon(
+      [point.x, point.y],
+      shape.meta.d.map((item) => [item.x, item.y])
+    )
+  },
+  // 闭合路径
+  CLOSED_PATH: (point, shape, buffer) => {
+    return pointInPolygon(
+      [point.x, point.y],
+      shape.meta.d.map((item) => [item.x, item.y])
+    )
+  },
+  // 直线
+  LINE: (point, shape, buffer) => {
+    const { x, y } = point
+    const dx = shape.meta.x2 - shape.meta.x1
+    const dy = shape.meta.y2 - shape.meta.y1
+    const d = Math.sqrt(dx * dx + dy * dy)
+    const cross = Math.abs((x - shape.meta.x1) * dy - (y - shape.meta.y1) * dx)
+    const dist = cross / d
+    return dist <= buffer
+  },
+  // 箭头直线
+  ARROW_LINE: (point, shape, buffer) => {
+    const { x, y } = point
+    const dx = shape.meta.x2 - shape.meta.x1
+    const dy = shape.meta.y2 - shape.meta.y1
+    const d = Math.sqrt(dx * dx + dy * dy)
+    const cross = Math.abs((x - shape.meta.x1) * dy - (y - shape.meta.y1) * dx)
+    const dist = cross / d
+    return dist <= buffer
+  },
+  // 点
+  POINT: (point, shape, buffer) => {},
+  // 多选
+  MULTISELECT: (point, shape, buffer) => {},
+  // 排除
+  EXCLUSION: (point, shape, buffer) => {},
+}
+
 const tools = {
   MOVE: "MOVE", // 移动
   RECT: "RECT", // 矩形
@@ -43,7 +374,7 @@ const tools = {
   CLOSED_PATH: "CLOSED_PATH", // 闭合路径
   LINE: "LINE", // 直线
   ARROW_LINE: "ARROW_LINE", // 箭头直线
-  POINT: "POINT", // 箭头直线
+  POINT: "POINT", // 点
   MULTISELECT: "MULTISELECT", // 多选
   EXCLUSION: "EXCLUSION", // 排除
 }
@@ -53,14 +384,24 @@ const state = reactive({
   tempShape: null, // 新增和编辑时的临时shape
   tools, // 支持的工具
   mode: tools.MOVE, // 绘图模式
-  scale: 0, // 比例
+  scale: 1, // 比例
+  shapesBounds, // 形状数组对应边界的映射
 })
+
+let lastMouseDownTimestamp = 0 // 多边形工具下判断双击完成形状的时间戳
 // 工具对应的鼠标处理函数
 const toolsMouseMap = {
   // 移动
   [state.tools.MOVE]: {
     // 按下
-    handleMouseDown: () => {},
+    handleMouseDown: () => {
+      if (isMouseOutside.value) {
+        return
+      }
+      if (hoverShape.value) {
+        state.tempShape = hoverShape.value
+      }
+    },
     // 抬起
     handleMouseUp: () => {},
     // 移动
@@ -137,11 +478,94 @@ const toolsMouseMap = {
   // 多边形
   [state.tools.POLYGON]: {
     // 按下
-    handleMouseDown: () => {},
+    handleMouseDown: () => {
+      if (isMouseOutside.value) {
+        return
+      }
+      const curMouseDownTimestamp = new Date().getTime()
+      const diff = curMouseDownTimestamp - lastMouseDownTimestamp
+      lastMouseDownTimestamp = curMouseDownTimestamp
+      const clickPoint = isPolygonToolToStartPointTooClose.value
+        ? state.tempShape.meta.points[0]
+        : dziCoordByMouse.value
+      const x = clickPoint.x
+      const y = clickPoint.y
+      const initPolygonShape = () => {
+        state.tempShape = {
+          id: null,
+          type: state.tools.POLYGON,
+          meta: {
+            points: [
+              {
+                x,
+                y,
+              },
+              {
+                x,
+                y,
+              },
+            ],
+          },
+        }
+      }
+      const completeShape = () => {
+        state.tempShape.meta.points.pop()
+        state.tempShape.id = new Date().getTime()
+        emits("add", state.tempShape)
+        state.tempShape = null
+      }
+      const addPoint = () => {
+        for (const v of state.tempShape.meta.points.slice(
+          0,
+          state.tempShape.meta.points.length - 1
+        )) {
+          if (x === v.x && y === v.y) {
+            return
+          }
+        }
+        state.tempShape.meta.points.push({
+          x,
+          y,
+        })
+      }
+      if (state.tempShape === null) {
+        initPolygonShape()
+      } else {
+        // 如果离初始点靠的太近 直接完成
+        if (
+          state.tempShape.meta.points.length > 3 &&
+          isPolygonToolToStartPointTooClose.value
+        ) {
+          completeShape()
+        } else {
+          addPoint()
+        }
+      }
+      if (diff < 300) {
+        lastMouseDownTimestamp = 0
+        if (state.tempShape === null) {
+          return
+        }
+        if (state.tempShape.meta.points.length > 3) {
+          completeShape()
+        }
+      }
+    },
     // 抬起
     handleMouseUp: () => {},
     // 移动
-    handleMouseMove: () => {},
+    handleMouseMove: () => {
+      if (!state.tempShape) {
+        return
+      }
+      if (isPolygonToolToStartPointTooClose.value) {
+        state.tempShape.meta.points[state.tempShape.meta.points.length - 1] =
+          state.tempShape.meta.points[0]
+        return
+      }
+      state.tempShape.meta.points[state.tempShape.meta.points.length - 1] =
+        dziCoordByMouse.value
+    },
   },
   // 圆
   [state.tools.CIRCLE]: {
@@ -487,6 +911,36 @@ const toolsMouseMap = {
     handleMouseMove: () => {},
   },
 }
+// 监听shapes的改变
+const stringifyShapes = computed(() => {
+  return JSON.stringify(props.shapes)
+})
+watch(
+  stringifyShapes,
+  (newData, oldData) => {
+    const newVal = JSON.parse(newData)
+    const oldVal = JSON.parse(oldData)
+    const newIds = newVal.map((item) => item.id)
+    const oldIds = oldVal.map((item) => item.id)
+    const newIdsSet = new Set(newIds)
+    const oldIdsSet = new Set(oldIds)
+    const addIds = newIds.filter((item) => !oldIdsSet.has(item))
+    const removeIds = oldIds.filter((item) => !newIdsSet.has(item))
+    for (const v of addIds) {
+      const item = newVal.filter((item) => item.id === v)[0]
+      state.shapesBounds.insert(getBounds(item))
+    }
+    for (const v of removeIds) {
+      const item = oldVal.filter((item) => item.id === v)[0]
+      state.shapesBounds.remove(item, (a, b) => {
+        return a.id === b.id
+      })
+    }
+  },
+  {
+    deep: true,
+  }
+)
 // 监听绘图模式
 watch(
   () => state.mode,
@@ -507,13 +961,6 @@ watch(isMousePressed, (newVal) => {
 // 监听鼠标位置
 watch([mouseX, mouseY], () => {
   toolsMouseMap[state.mode].handleMouseMove()
-  // 另一种不依赖osd的api，自行计算的方法
-  // const pt = svgRef.value.createSVGPoint()
-  // pt.x = mouseX.value
-  // pt.y = mouseY.value
-  // console.log(
-  //   pt.matrixTransform(svgRootGroupRef.value.getScreenCTM().inverse())
-  // )
 })
 
 // 鼠标实时的画布坐标
@@ -563,20 +1010,12 @@ const updateTransform = () => {
   state.transform = `translate(${p.x}, ${p.y}) scale(${scaleX}, ${scaleY}) rotate(${rotation})`
 }
 
-// 获取两点之间的距离
-const getDistanceBetweenTwoPoints = (pointA, pointB) =>
-  Math.sqrt(Math.pow(pointA.x - pointB.x, 2) + Math.pow(pointA.y - pointB.y, 2))
-
 // 获取箭头的path
 const getArrowPath = (shape) => {
   const startPoint = [shape.meta.x1, shape.meta.y1]
   const endPoint = [shape.meta.x2, shape.meta.y2]
   const angle = lineAngle([startPoint, endPoint])
   const referencePoint = [endPoint[0], endPoint[1] + 10]
-  console.log(startPoint)
-  console.log(endPoint)
-  console.log(angle)
-  console.log(referencePoint)
   const pointA = pointRotate(referencePoint, angle + 90 + 30, endPoint)
   const pointB = pointRotate(referencePoint, angle + 90 - 30, endPoint)
   return `M${pointA[0]} ${pointA[1]} L${endPoint[0]} ${endPoint[1]} L${pointB[0]} ${pointB[1]}`
@@ -604,20 +1043,30 @@ defineExpose({
 
 <template>
   <div class="temp-panel">
-    x：{{ mouseX }} <br />
-    y：{{ mouseY }} <br />
-    isOutside：{{ isMouseOutside }}<br />
+    <strong>DEBUG</strong> <br />
+    mouseX：{{ mouseX }} <br />
+    mouseY：{{ mouseY }} <br />
+    dziCoordByMouseX：{{ dziCoordByMouse.x }}<br />
+    dziCoordByMouseY：{{ dziCoordByMouse.y }}<br />
+    isMouseOutside：{{ isMouseOutside }}<br />
     isMousePressed：{{ isMousePressed }} <br />
-    mouseSourceType：{{ mouseSourceType }} <br />
-    dziCoordByMouse：{{ dziCoordByMouse }}
+    mouseSourceType：{{ mouseSourceType ?? "-" }} <br />
+    hoverShapeId：{{ hoverShape?.id ?? "-" }}<br />
   </div>
-  <svg ref="svgRef" class="painter" @contextmenu="handleContextmenu">
+  <svg
+    ref="svgRef"
+    :class="['painter', hoverShape ? 'CP' : '']"
+    @contextmenu="handleContextmenu"
+  >
     <g ref="svgRootGroupRef" :transform="state.transform">
       <!-- 普通形状 -->
       <g
         v-for="item in computedShapes"
         :key="item.id"
-        :class="`${item.type}_GROUP`"
+        :class="[
+          `${item.type}_GROUP`,
+          hoverShape?.id === item.id ? 'HOVER' : '',
+        ]"
       >
         <!-- 矩形 -->
         <rect
@@ -716,14 +1165,21 @@ defineExpose({
         ></rect>
         <!-- 多边形 -->
         <template v-if="state.tempShape.type === state.tools.POLYGON">
-          <polygon
+          <path
             :class="state.tempShape.type"
-            :points="
-              state.tempShape.meta.points.map((pt) => `${pt.x},${pt.y} `)
-            "
-          ></polygon>
+            :d="`M${state.tempShape.meta.points[0].x} ${
+              state.tempShape.meta.points[0].y
+            } ${state.tempShape.meta.points
+              .slice(1)
+              .map((pt) => `L${pt.x} ${pt.y} `)}`"
+          ></path>
           <circle
-            class="POLYGON_APPENDAGE_ANCHOR"
+            :class="[
+              'POLYGON_APPENDAGE_ANCHOR',
+              isPolygonToolToStartPointTooClose
+                ? 'POLYGON_APPENDAGE_ANCHOR_LARGE'
+                : '',
+            ]"
             :cx="state.tempShape.meta.points[0].x"
             :cy="state.tempShape.meta.points[0].y"
             :transform="`scale(${1 / state.scale})`"
@@ -833,13 +1289,16 @@ defineExpose({
 <style lang="scss" scoped>
 .temp-panel {
   position: fixed;
-  top: 0;
+  bottom: 0;
   right: 0;
   border: 1px solid #ccc;
   background-color: #ddd;
   padding: 10px;
   z-index: 999;
-  width: 200px;
+  width: 400px;
+}
+.CP {
+  cursor: pointer;
 }
 .painter {
   position: absolute;
@@ -855,6 +1314,7 @@ defineExpose({
   line {
     vector-effect: non-scaling-stroke;
   }
+
   // 普通形状
   // 矩形
   .RECT_GROUP {
@@ -924,13 +1384,55 @@ defineExpose({
       fill: none;
     }
   }
-
   // 点
   .POINT_GROUP {
     .POINT {
-      fill: rgba(255, 255, 0, 0.5);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: rgba(255, 0, 0, 1);
+      stroke: #fff;
+      stroke-width: 1px;
+      r: 5;
+    }
+  }
+  // hover形状
+  .HOVER {
+    // 矩形
+    .RECT {
+      stroke-width: 3px;
+    }
+    // 多边形
+    .POLYGON {
+      stroke-width: 3px;
+    }
+    // 圆
+    .CIRCLE {
+      stroke-width: 3px;
+    }
+    // 椭圆
+    .ELLIPSE {
+      stroke-width: 3px;
+    }
+    // 路径
+    .PATH {
+      stroke-width: 3px;
+    }
+    // 闭合路径
+    .CLOSED_PATH {
+      stroke-width: 3px;
+    }
+    // 直线
+    .LINE {
+      stroke-width: 3px;
+    }
+    // 箭头直线
+    .ARROW_LINE {
+      stroke-width: 3px;
+    }
+    // 附属箭头
+    .ARROW_LINE_APPENDAGE_ARROW {
+      stroke-width: 3px;
+    }
+    // 点
+    .POINT {
       r: 6;
     }
   }
@@ -950,9 +1452,13 @@ defineExpose({
     }
     // 附属锚点
     .POLYGON_APPENDAGE_ANCHOR {
-      fill: rgba(255, 255, 255, 1);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: rgba(255, 255, 0, 1);
+      stroke: #fff;
+      stroke-width: 1px;
+      r: 5;
+    }
+    // 更大的附属锚点
+    .POLYGON_APPENDAGE_ANCHOR_LARGE {
       r: 6;
     }
     // 圆
@@ -997,47 +1503,54 @@ defineExpose({
     }
     // 点
     .POINT {
-      fill: rgba(255, 255, 0, 0.5);
-      stroke: #f00;
-      stroke-width: 2px;
-      r: 6;
+      fill: rgba(255, 0, 0, 1);
+      stroke: #fff;
+      stroke-width: 1px;
+      r: 5;
     }
   }
   // 编辑形状
   .EDIT_GROUP {
+    // 锚点
+    .ANCHOR {
+      fill: rgba(255, 255, 0, 1);
+      stroke: #fff;
+      stroke-width: 1px;
+      r: 5;
+    }
     // 矩形
     .RECT {
-      fill: none;
+      fill: rgba(255, 0, 0, 0.2);
       stroke: #f00;
       stroke-width: 2px;
     }
     // 多边形
     .POLYGON {
-      fill: none;
+      fill: rgba(255, 0, 0, 0.2);
       stroke: #f00;
       stroke-width: 2px;
     }
     // 圆
     .CIRCLE {
-      fill: none;
+      fill: rgba(255, 0, 0, 0.2);
       stroke: #f00;
       stroke-width: 2px;
     }
     // 椭圆
     .ELLIPSE {
-      fill: none;
+      fill: rgba(255, 0, 0, 0.2);
       stroke: #f00;
       stroke-width: 2px;
     }
     // 路径
     .PATH {
-      fill: none;
+      fill: rgba(255, 0, 0, 0.2);
       stroke: #f00;
       stroke-width: 2px;
     }
     // 闭合路径
     .CLOSED_PATH {
-      fill: none;
+      fill: rgba(255, 0, 0, 0.2);
       stroke: #f00;
       stroke-width: 2px;
     }
@@ -1053,10 +1566,10 @@ defineExpose({
     }
     // 点
     .POINT {
-      fill: rgba(255, 255, 255, 1);
-      stroke: #f00;
-      stroke-width: 2px;
-      r: 6;
+      fill: rgba(255, 255, 0, 1);
+      stroke: #fff;
+      stroke-width: 1px;
+      r: 5;
     }
   }
 }
