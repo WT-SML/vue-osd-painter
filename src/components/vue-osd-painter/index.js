@@ -5,7 +5,13 @@ const initPainter = (painterConf) => {
   const el = document.createElement("div")
   painterConf.viewer.canvas.appendChild(el)
   const app = createApp(h(painter, painterConf))
-  return app.mount(el)
+  const componentInstance = app.mount(el)
+  componentInstance._app = app
+  componentInstance.destroy = () => {
+    app.unmount()
+    el.remove()
+  }
+  return componentInstance
 }
 
 export default initPainter

@@ -9,14 +9,22 @@ import {
   watch,
   getCurrentInstance,
 } from "vue"
-import { useMouseInElement, useMousePressed } from "@vueuse/core"
+import {
+  createGlobalState,
+  useMouseInElement,
+  useMousePressed,
+} from "@vueuse/core"
 import { lineAngle, pointRotate, pointInPolygon, lineLength } from "geometric"
 import RBush from "rbush"
+import _ from "lodash"
 
 const props = defineProps({
   viewer: Object, // osd 查看器
   shapes: Array, // 需要渲染的形状数组
 })
+
+const anchorRadius = 5 // 锚点半径
+const anchorRadiusLarge = 6 // 更大的锚点半径
 
 const emits = defineEmits(["add", "remove", "update"])
 
@@ -24,13 +32,12 @@ const svgRef = ref(null)
 const svgRootGroupRef = ref(null)
 
 const {
-  x: mouseX,
-  y: mouseY,
+  elementX: mouseX,
+  elementY: mouseY,
   isOutside: isMouseOutside,
 } = useMouseInElement(svgRef)
 
-const { pressed: isMousePressed, sourceType: mouseSourceType } =
-  useMousePressed()
+const isLeftMousePressed = ref(false)
 
 // 初始化形状边界数组
 const shapesBounds = new RBush()
@@ -150,10 +157,10 @@ const isPolygonToolToStartPointTooClose = computed(() => {
     return false
   }
   return (
-    lineLength(
+    lineLength([
       [state.tempShape.meta.points[0].x, state.tempShape.meta.points[0].y],
-      [dziCoordByMouse.value.x, dziCoordByMouse.value.y]
-    ) <
+      [dziCoordByMouse.value.x, dziCoordByMouse.value.y],
+    ]) <
     14 / state.scale
   )
 })
@@ -196,6 +203,96 @@ const hoverShape = computed(() => {
       return getShapeArea(shapeA) - getShapeArea(shapeB)
     })
     return props.shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
+  }
+  return null
+})
+// 编辑中的锚点列表
+const editAnchors = computed(() => {
+  if (!state.tempShape) {
+    return null
+  }
+  if (!state.tempShape.id) {
+    return null
+  }
+  const shapeGetAnchorsFuncMap = {
+    // 矩形
+    [state.tools.RECT]: (shape) => {
+      return [
+        // 左上
+        { x: shape.meta.x, y: shape.meta.y },
+        // 右上
+        { x: shape.meta.x + shape.meta.width, y: shape.meta.y },
+        // 左下
+        { x: shape.meta.x, y: shape.meta.y + shape.meta.height },
+        // 右下
+        {
+          x: shape.meta.x + shape.meta.width,
+          y: shape.meta.y + shape.meta.height,
+        },
+      ]
+    },
+    // 多边形
+    [state.tools.POLYGON]: (shape) => {
+      return shape.meta.points
+    },
+    // 圆
+    [state.tools.CIRCLE]: (shape) => {
+      return [
+        {
+          x: state.tempShape.meta.cx + state.tempShape.meta.rx,
+          y: state.tempShape.meta.cy,
+        },
+      ]
+    },
+    // 椭圆
+    [state.tools.ELLIPSE]: (shape) => {
+      return [
+        {
+          x: state.tempShape.meta.cx,
+          y: state.tempShape.meta.cy - state.tempShape.meta.ry,
+        },
+        {
+          x: state.tempShape.meta.cx + state.tempShape.meta.rx,
+          y: state.tempShape.meta.cy,
+        },
+      ]
+    },
+    // 直线
+    [state.tools.LINE]: (shape) => {
+      return [
+        { x: shape.meta.x1, y: shape.meta.y1 },
+        { x: shape.meta.x2, y: shape.meta.y2 },
+      ]
+    },
+    // 箭头直线
+    [state.tools.ARROW_LINE]: (shape) => {
+      return [
+        { x: shape.meta.x1, y: shape.meta.y1 },
+        { x: shape.meta.x2, y: shape.meta.y2 },
+      ]
+    },
+  }
+  if (shapeGetAnchorsFuncMap[state.tempShape.type]) {
+    console.log(shapeGetAnchorsFuncMap[state.tempShape.type](state.tempShape))
+    return shapeGetAnchorsFuncMap[state.tempShape.type](state.tempShape)
+  }
+  return null
+})
+// 悬浮的锚点
+const hoverAnchor = computed(() => {
+  if (!editAnchors.value) {
+    return null
+  }
+  for (const v of editAnchors.value) {
+    if (
+      lineLength([
+        [v.x, v.y],
+        [dziCoordByMouse.value.x, dziCoordByMouse.value.y],
+      ]) <
+      (anchorRadius + 2) / state.scale
+    ) {
+      return v
+    }
   }
   return null
 })
@@ -389,6 +486,9 @@ const state = reactive({
 })
 
 let lastMouseDownTimestamp = 0 // 多边形工具下判断双击完成形状的时间戳
+let tempCurMousePoint = null // 开始编辑前的鼠标位置
+let tempShape = null // 开始编辑前形状的副本
+let tempAnchor = null // 开始编辑前锚点的副本
 // 工具对应的鼠标处理函数
 const toolsMouseMap = {
   // 移动
@@ -398,14 +498,341 @@ const toolsMouseMap = {
       if (isMouseOutside.value) {
         return
       }
-      if (hoverShape.value) {
-        state.tempShape = hoverShape.value
+      const curMouseDownTimestamp = new Date().getTime()
+      lastMouseDownTimestamp = curMouseDownTimestamp
+      // 在锚点上按下
+      if (state.tempShape && hoverAnchor.value) {
+        props.viewer.setMouseNavEnabled(false)
+        tempCurMousePoint = dziCoordByMouse.value
+        tempAnchor = _.cloneDeep(hoverAnchor.value)
+        tempShape = _.cloneDeep(state.tempShape)
+        return
       }
+      // 在编辑的shape上按下
+      if (
+        state.tempShape &&
+        hoverShape.value &&
+        state.tempShape.id === hoverShape.value.id
+      ) {
+        props.viewer.setMouseNavEnabled(false)
+        tempCurMousePoint = dziCoordByMouse.value
+        tempAnchor = null
+        tempShape = _.cloneDeep(state.tempShape)
+        return
+      }
+      tempCurMousePoint = null
+      tempShape = null
+      tempAnchor = null
+      props.viewer.setMouseNavEnabled(true)
     },
     // 抬起
-    handleMouseUp: () => {},
+    handleMouseUp: () => {
+      if (isMouseOutside.value) {
+        return
+      }
+      const curMouseDownTimestamp = new Date().getTime()
+      const diff = curMouseDownTimestamp - lastMouseDownTimestamp
+      if (diff < 150) {
+        // 短按
+        // 短按了锚点
+        if (hoverAnchor.value) {
+          return
+        }
+        // 短按了形状
+        if (hoverShape.value) {
+          // 当前有编辑中的形状
+          if (state.tempShape) {
+            if (state.tempShape.id !== hoverShape.value.id) {
+              const originalShape = props.shapes.find(
+                (item) => item.id === state.tempShape.id
+              )
+              if (
+                JSON.stringify(originalShape) !==
+                JSON.stringify(state.tempShape)
+              ) {
+                emits("update", state.tempShape)
+              }
+              state.tempShape = _.cloneDeep(hoverShape.value)
+            }
+            // 当前没有编辑中的形状
+          } else {
+            state.tempShape = _.cloneDeep(hoverShape.value)
+          }
+          return
+        }
+        // 短按空白区域
+        if (state.tempShape) {
+          // 如果有临时shape则触发编辑保存
+          const originalShape = props.shapes.find(
+            (item) => item.id === state.tempShape.id
+          )
+          if (
+            JSON.stringify(originalShape) !== JSON.stringify(state.tempShape)
+          ) {
+            emits("update", state.tempShape)
+          }
+          state.tempShape = null
+        }
+      } else {
+        // 长按
+      }
+    },
     // 移动
-    handleMouseMove: () => {},
+    handleMouseMove: () => {
+      // 在锚点上移动
+      if (state.tempShape && tempAnchor && isLeftMousePressed.value) {
+        const diff = {
+          x: dziCoordByMouse.value.x - tempCurMousePoint.x,
+          y: dziCoordByMouse.value.y - tempCurMousePoint.y,
+        }
+        const anchorHandleMoveFuncMap = {
+          // 矩形
+          [state.tools.RECT]: (shape, cloneShape, tempAnchor, diff) => {
+            // 左上
+            if (
+              tempAnchor.x === cloneShape.meta.x &&
+              tempAnchor.y === cloneShape.meta.y
+            ) {
+              if (diff.x < cloneShape.meta.width) {
+                shape.meta.x = cloneShape.meta.x + diff.x
+                shape.meta.width = cloneShape.meta.width - diff.x
+              } else {
+                shape.meta.x = cloneShape.meta.x + cloneShape.meta.width
+                shape.meta.width = diff.x - cloneShape.meta.width
+              }
+              if (diff.y < cloneShape.meta.height) {
+                shape.meta.y = cloneShape.meta.y + diff.y
+                shape.meta.height = cloneShape.meta.height - diff.y
+              } else {
+                shape.meta.y = cloneShape.meta.y + cloneShape.meta.height
+                shape.meta.height = diff.y - cloneShape.meta.height
+              }
+              return
+            }
+            // 右上
+            if (
+              tempAnchor.x === cloneShape.meta.x + cloneShape.meta.width &&
+              tempAnchor.y === cloneShape.meta.y
+            ) {
+              if (diff.x < -cloneShape.meta.width) {
+                shape.meta.x =
+                  cloneShape.meta.x + cloneShape.meta.width + diff.x
+                shape.meta.width = -diff.x - cloneShape.meta.width
+              } else {
+                shape.meta.width = cloneShape.meta.width + diff.x
+              }
+              if (diff.y > cloneShape.meta.height) {
+                shape.meta.y = cloneShape.meta.y + cloneShape.meta.height
+                shape.meta.height = diff.y - cloneShape.meta.height
+              } else {
+                shape.meta.y = cloneShape.meta.y + diff.y
+                shape.meta.height = cloneShape.meta.height - diff.y
+              }
+              return
+            }
+            // 左下
+            if (
+              tempAnchor.x === cloneShape.meta.x &&
+              tempAnchor.y === cloneShape.meta.y + cloneShape.meta.height
+            ) {
+              if (diff.x < cloneShape.meta.width) {
+                shape.meta.x = cloneShape.meta.x + diff.x
+                shape.meta.width = cloneShape.meta.width - diff.x
+              } else {
+                shape.meta.x = cloneShape.meta.x + cloneShape.meta.width
+                shape.meta.width = diff.x - cloneShape.meta.width
+              }
+              if (-diff.y > cloneShape.meta.height) {
+                shape.meta.y =
+                  cloneShape.meta.y + cloneShape.meta.height + diff.y
+                shape.meta.height = -diff.y - cloneShape.meta.height
+              } else {
+                shape.meta.height = cloneShape.meta.height + diff.y
+              }
+            }
+            // 右下
+            if (
+              tempAnchor.x === cloneShape.meta.x + cloneShape.meta.width &&
+              tempAnchor.y === cloneShape.meta.y + cloneShape.meta.height
+            ) {
+              if (diff.x < -cloneShape.meta.width) {
+                shape.meta.x =
+                  cloneShape.meta.x + cloneShape.meta.width + diff.x
+                shape.meta.width = -diff.x - cloneShape.meta.width
+              } else {
+                shape.meta.width = cloneShape.meta.width + diff.x
+              }
+              if (-diff.y > cloneShape.meta.height) {
+                shape.meta.y =
+                  cloneShape.meta.y + cloneShape.meta.height + diff.y
+                shape.meta.height = -diff.y - cloneShape.meta.height
+              } else {
+                shape.meta.height = cloneShape.meta.height + diff.y
+              }
+              return
+            }
+          },
+          // 多边形
+          [state.tools.POLYGON]: (shape, cloneShape, tempAnchor, diff) => {
+            let i = 0
+            for (const _i in cloneShape.meta.points) {
+              const item = cloneShape.meta.points[_i]
+              if (item.x === tempAnchor.x && item.y === tempAnchor.y) {
+                i = Number(_i)
+              }
+            }
+            shape.meta.points[i].x = tempAnchor.x + diff.x
+            shape.meta.points[i].y = tempAnchor.y + diff.y
+          },
+          // 圆
+          [state.tools.CIRCLE]: (shape, cloneShape, tempAnchor, diff) => {
+            const ret = Math.max(cloneShape.meta.rx + diff.x, 1)
+            shape.meta.rx = ret
+            shape.meta.ry = ret
+          },
+          // 椭圆
+          [state.tools.ELLIPSE]: (shape, cloneShape, tempAnchor, diff) => {
+            // 上边的点
+            if (
+              tempAnchor.x === cloneShape.meta.cx &&
+              tempAnchor.y === cloneShape.meta.cy - cloneShape.meta.ry
+            ) {
+              const ret = Math.max(cloneShape.meta.ry - diff.y, 1)
+              shape.meta.ry = ret
+              return
+            }
+            // 右边的点
+            if (
+              tempAnchor.x === cloneShape.meta.cx + cloneShape.meta.rx &&
+              tempAnchor.y === cloneShape.meta.cy
+            ) {
+              const ret = Math.max(cloneShape.meta.rx + diff.x, 1)
+              shape.meta.rx = ret
+              return
+            }
+          },
+          // 直线
+          [state.tools.LINE]: (shape, cloneShape, tempAnchor, diff) => {
+            // 起始点
+            if (
+              tempAnchor.x === cloneShape.meta.x1 &&
+              tempAnchor.y === cloneShape.meta.y1
+            ) {
+              shape.meta.x1 = cloneShape.meta.x1 + diff.x
+              shape.meta.y1 = cloneShape.meta.y1 + diff.y
+              return
+            }
+            // 结束点
+            if (
+              tempAnchor.x === cloneShape.meta.x2 &&
+              tempAnchor.y === cloneShape.meta.y2
+            ) {
+              shape.meta.x2 = cloneShape.meta.x2 + diff.x
+              shape.meta.y2 = cloneShape.meta.y2 + diff.y
+              return
+            }
+          },
+          // 箭头直线
+          [state.tools.ARROW_LINE]: (shape, cloneShape, tempAnchor, diff) => {
+            // 起始点
+            if (
+              tempAnchor.x === cloneShape.meta.x1 &&
+              tempAnchor.y === cloneShape.meta.y1
+            ) {
+              shape.meta.x1 = cloneShape.meta.x1 + diff.x
+              shape.meta.y1 = cloneShape.meta.y1 + diff.y
+              return
+            }
+            // 结束点
+            if (
+              tempAnchor.x === cloneShape.meta.x2 &&
+              tempAnchor.y === cloneShape.meta.y2
+            ) {
+              shape.meta.x2 = cloneShape.meta.x2 + diff.x
+              shape.meta.y2 = cloneShape.meta.y2 + diff.y
+              return
+            }
+          },
+        }
+        anchorHandleMoveFuncMap[state.tempShape.type](
+          state.tempShape,
+          tempShape,
+          tempAnchor,
+          diff
+        )
+        return
+      }
+      // 在编辑的shape上移动
+      if (state.tempShape && tempShape && isLeftMousePressed.value) {
+        const diff = {
+          x: dziCoordByMouse.value.x - tempCurMousePoint.x,
+          y: dziCoordByMouse.value.y - tempCurMousePoint.y,
+        }
+        const shapeHandleMoveFuncMap = {
+          // 矩形
+          [state.tools.RECT]: (shape, cloneShape, diff) => {
+            shape.meta.x = cloneShape.meta.x + diff.x
+            shape.meta.y = cloneShape.meta.y + diff.y
+          },
+          // 多边形
+          [state.tools.POLYGON]: (shape, cloneShape, diff) => {
+            shape.meta.points = cloneShape.meta.points.map((item) => ({
+              x: item.x + diff.x,
+              y: item.y + diff.y,
+            }))
+          },
+          // 圆
+          [state.tools.CIRCLE]: (shape, cloneShape, diff) => {
+            shape.meta.cx = cloneShape.meta.cx + diff.x
+            shape.meta.cy = cloneShape.meta.cy + diff.y
+          },
+          // 椭圆
+          [state.tools.ELLIPSE]: (shape, cloneShape, diff) => {
+            shape.meta.cx = cloneShape.meta.cx + diff.x
+            shape.meta.cy = cloneShape.meta.cy + diff.y
+          },
+          // 路径
+          [state.tools.PATH]: (shape, cloneShape, diff) => {
+            shape.meta.d = cloneShape.meta.d.map((item) => ({
+              x: item.x + diff.x,
+              y: item.y + diff.y,
+            }))
+          },
+          // 闭合路径
+          [state.tools.CLOSED_PATH]: (shape, cloneShape, diff) => {
+            shape.meta.d = cloneShape.meta.d.map((item) => ({
+              x: item.x + diff.x,
+              y: item.y + diff.y,
+            }))
+          },
+          // 直线
+          [state.tools.LINE]: (shape, cloneShape, diff) => {
+            shape.meta.x1 = cloneShape.meta.x1 + diff.x
+            shape.meta.x2 = cloneShape.meta.x2 + diff.x
+            shape.meta.y1 = cloneShape.meta.y1 + diff.y
+            shape.meta.y2 = cloneShape.meta.y2 + diff.y
+          },
+          // 箭头直线
+          [state.tools.ARROW_LINE]: (shape, cloneShape, diff) => {
+            shape.meta.x1 = cloneShape.meta.x1 + diff.x
+            shape.meta.x2 = cloneShape.meta.x2 + diff.x
+            shape.meta.y1 = cloneShape.meta.y1 + diff.y
+            shape.meta.y2 = cloneShape.meta.y2 + diff.y
+          },
+          // 点
+          [state.tools.POINT]: (shape, cloneShape, diff) => {
+            shape.meta.cx = cloneShape.meta.cx + diff.x
+            shape.meta.cy = cloneShape.meta.cy + diff.y
+          },
+        }
+        shapeHandleMoveFuncMap[state.tempShape.type](
+          state.tempShape,
+          tempShape,
+          diff
+        )
+        return
+      }
+    },
   },
   // 矩形
   [state.tools.RECT]: {
@@ -649,7 +1076,7 @@ const toolsMouseMap = {
       }
       state.tempShape = {
         id: null,
-        type: state.tools.CIRCLE,
+        type: state.tools.ELLIPSE,
         meta: {
           cx: dziCoordByMouse.value.x,
           cy: dziCoordByMouse.value.y,
@@ -926,6 +1353,14 @@ watch(
     const oldIdsSet = new Set(oldIds)
     const addIds = newIds.filter((item) => !oldIdsSet.has(item))
     const removeIds = oldIds.filter((item) => !newIdsSet.has(item))
+    const updateIds = newIds.filter((item) => {
+      if (addIds.includes(item) || removeIds.includes(item)) {
+        return false
+      }
+      const oldItem = oldVal.filter((_item) => _item.id === item)[0]
+      const newItem = newVal.filter((_item) => _item.id === item)[0]
+      return JSON.stringify(oldItem) !== JSON.stringify(newItem)
+    })
     for (const v of addIds) {
       const item = newVal.filter((item) => item.id === v)[0]
       state.shapesBounds.insert(getBounds(item))
@@ -935,6 +1370,16 @@ watch(
       state.shapesBounds.remove(item, (a, b) => {
         return a.id === b.id
       })
+      if (state.tempShape && state.tempShape.id === item.id) {
+        state.tempShape = null
+      }
+    }
+    for (const v of updateIds) {
+      const newItem = newVal.filter((item) => item.id === v)[0]
+      state.shapesBounds.remove(newItem, (a, b) => {
+        return a.id === b.id
+      })
+      state.shapesBounds.insert(getBounds(newItem))
     }
   },
   {
@@ -950,7 +1395,7 @@ watch(
   }
 )
 // 监听鼠标按下
-watch(isMousePressed, (newVal) => {
+watch(isLeftMousePressed, (newVal) => {
   if (newVal) {
     toolsMouseMap[state.mode].handleMouseDown()
   } else {
@@ -1030,6 +1475,22 @@ const handleContextmenu = (e) => {
 onMounted(() => {
   updateTransform()
   listenForViewerEvents()
+  // 创建一个鼠标跟踪器
+  const tracker = new osd.MouseTracker({
+    element: svgRef.value,
+    pressHandler: (e) => {
+      isLeftMousePressed.value = true
+    },
+    releaseHandler: (e) => {
+      isLeftMousePressed.value = false
+    },
+    moveHandler: (e) => {
+      mouseX.value = e.position.x
+      mouseY.value = e.position.y
+    },
+  })
+  // 启用鼠标跟踪器
+  tracker.setTracking(true)
 })
 
 // 卸载
@@ -1049,8 +1510,7 @@ defineExpose({
     dziCoordByMouseX：{{ dziCoordByMouse.x }}<br />
     dziCoordByMouseY：{{ dziCoordByMouse.y }}<br />
     isMouseOutside：{{ isMouseOutside }}<br />
-    isMousePressed：{{ isMousePressed }} <br />
-    mouseSourceType：{{ mouseSourceType ?? "-" }} <br />
+    isLeftMousePressed：{{ isLeftMousePressed }} <br />
     hoverShapeId：{{ hoverShape?.id ?? "-" }}<br />
   </div>
   <svg
@@ -1263,24 +1723,168 @@ defineExpose({
       <!-- 编辑形状 -->
       <g class="EDIT_GROUP" v-if="state.tempShape?.id">
         <!-- 矩形 -->
-        <rect
-          v-if="state.tempShape.type === state.tools.RECT"
-          :class="state.tempShape.type"
-          :x="state.tempShape.meta.x"
-          :y="state.tempShape.meta.y"
-          :width="state.tempShape.meta.width"
-          :height="state.tempShape.meta.height"
-        ></rect>
+        <template v-if="state.tempShape.type === state.tools.RECT">
+          <!-- 本体 -->
+          <rect
+            v-if="state.tempShape.type === state.tools.RECT"
+            :class="state.tempShape.type"
+            :x="state.tempShape.meta.x"
+            :y="state.tempShape.meta.y"
+            :width="state.tempShape.meta.width"
+            :height="state.tempShape.meta.height"
+          ></rect>
+          <!-- 锚点 -->
+          <circle
+            v-for="(item, i) in editAnchors"
+            :key="i"
+            class="ANCHOR"
+            :cx="item.x"
+            :cy="item.y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${item.x} ${item.y}`"
+          ></circle>
+        </template>
+        <!-- 多边形 -->
+        <template v-if="state.tempShape.type === state.tools.POLYGON">
+          <!-- 本体 -->
+          <path
+            :class="state.tempShape.type"
+            :d="`M${state.tempShape.meta.points[0].x} ${
+              state.tempShape.meta.points[0].y
+            } ${state.tempShape.meta.points
+              .slice(1)
+              .map((pt) => `L${pt.x} ${pt.y} `)}Z`"
+          ></path>
+          <!-- 锚点 -->
+          <circle
+            v-for="(item, i) in editAnchors"
+            :key="i"
+            class="ANCHOR"
+            :cx="item.x"
+            :cy="item.y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${item.x} ${item.y}`"
+          ></circle>
+        </template>
+        <!-- 圆 -->
+        <template v-if="state.tempShape.type === state.tools.CIRCLE">
+          <!-- 本体 -->
+          <ellipse
+            :class="state.tempShape.type"
+            :cx="state.tempShape.meta.cx"
+            :cy="state.tempShape.meta.cy"
+            :rx="state.tempShape.meta.rx"
+            :ry="state.tempShape.meta.ry"
+          ></ellipse>
+          <!-- 锚点 -->
+          <circle
+            v-for="(item, i) in editAnchors"
+            :key="i"
+            class="ANCHOR"
+            :cx="item.x"
+            :cy="item.y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${item.x} ${item.y}`"
+          ></circle>
+        </template>
+        <!-- 椭圆 -->
+        <template v-if="state.tempShape.type === state.tools.ELLIPSE">
+          <!-- 本体 -->
+          <ellipse
+            :class="state.tempShape.type"
+            :cx="state.tempShape.meta.cx"
+            :cy="state.tempShape.meta.cy"
+            :rx="state.tempShape.meta.rx"
+            :ry="state.tempShape.meta.ry"
+          ></ellipse>
+          <!-- 锚点 -->
+          <circle
+            v-for="(item, i) in editAnchors"
+            :key="i"
+            class="ANCHOR"
+            :cx="item.x"
+            :cy="item.y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${item.x} ${item.y}`"
+          ></circle>
+        </template>
         <!-- 路径 -->
-        <path
-          v-if="state.tempShape.type === state.tools.PATH"
-          :class="state.tempShape.type"
-          :d="`M${state.tempShape.meta.d[0].x} ${
-            state.tempShape.meta.d[0].y
-          } ${state.tempShape.meta.d
-            .slice(1)
-            .map((pt) => `L${pt.x} ${pt.y} `)}`"
-        ></path>
+        <template v-if="state.tempShape.type === state.tools.PATH">
+          <!-- 本体 -->
+          <path
+            :class="state.tempShape.type"
+            :d="`M${state.tempShape.meta.d[0].x} ${
+              state.tempShape.meta.d[0].y
+            } ${state.tempShape.meta.d
+              .slice(1)
+              .map((pt) => `L${pt.x} ${pt.y} `)}`"
+          ></path>
+        </template>
+        <!-- 闭合路径 -->
+        <template v-if="state.tempShape.type === state.tools.CLOSED_PATH">
+          <!-- 本体 -->
+          <path
+            :class="state.tempShape.type"
+            :d="`M${state.tempShape.meta.d[0].x} ${
+              state.tempShape.meta.d[0].y
+            } ${state.tempShape.meta.d
+              .slice(1)
+              .map((pt) => `L${pt.x} ${pt.y} `)} Z`"
+          ></path>
+        </template>
+        <!-- 直线 -->
+        <template v-if="state.tempShape.type === state.tools.LINE">
+          <!-- 本体 -->
+          <line
+            :class="state.tempShape.type"
+            :x1="state.tempShape.meta.x1"
+            :y1="state.tempShape.meta.y1"
+            :x2="state.tempShape.meta.x2"
+            :y2="state.tempShape.meta.y2"
+          ></line>
+          <!-- 锚点 -->
+          <circle
+            v-for="(item, i) in editAnchors"
+            :key="i"
+            class="ANCHOR"
+            :cx="item.x"
+            :cy="item.y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${item.x} ${item.y}`"
+          ></circle>
+        </template>
+        <!-- 箭头直线 -->
+        <template v-if="state.tempShape.type === state.tools.ARROW_LINE">
+          <!-- 本体 -->
+          <line
+            :class="state.tempShape.type"
+            :x1="state.tempShape.meta.x1"
+            :y1="state.tempShape.meta.y1"
+            :x2="state.tempShape.meta.x2"
+            :y2="state.tempShape.meta.y2"
+          ></line>
+          <!-- 锚点 -->
+          <circle
+            v-for="(item, i) in editAnchors"
+            :key="i"
+            class="ANCHOR"
+            :cx="item.x"
+            :cy="item.y"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${item.x} ${item.y}`"
+          ></circle>
+        </template>
+        <!-- 点 -->
+        <template v-if="state.tempShape.type === state.tools.POINT">
+          <!-- 本体 -->
+          <circle
+            :class="state.tempShape.type"
+            :cx="state.tempShape.meta.cx"
+            :cy="state.tempShape.meta.cy"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${state.tempShape.meta.cx} ${state.tempShape.meta.cy}`"
+          ></circle>
+        </template>
       </g>
     </g>
   </svg>
@@ -1390,7 +1994,7 @@ defineExpose({
       fill: rgba(255, 0, 0, 1);
       stroke: #fff;
       stroke-width: 1px;
-      r: 5;
+      r: v-bind(anchorRadius);
     }
   }
   // hover形状
@@ -1433,7 +2037,7 @@ defineExpose({
     }
     // 点
     .POINT {
-      r: 6;
+      r: v-bind(anchorRadiusLarge);
     }
   }
   // 新增形状
@@ -1455,11 +2059,11 @@ defineExpose({
       fill: rgba(255, 255, 0, 1);
       stroke: #fff;
       stroke-width: 1px;
-      r: 5;
+      r: v-bind(anchorRadius);
     }
     // 更大的附属锚点
     .POLYGON_APPENDAGE_ANCHOR_LARGE {
-      r: 6;
+      r: v-bind(anchorRadiusLarge);
     }
     // 圆
     .CIRCLE {
@@ -1506,7 +2110,7 @@ defineExpose({
       fill: rgba(255, 0, 0, 1);
       stroke: #fff;
       stroke-width: 1px;
-      r: 5;
+      r: v-bind(anchorRadius);
     }
   }
   // 编辑形状
@@ -1516,7 +2120,7 @@ defineExpose({
       fill: rgba(255, 255, 0, 1);
       stroke: #fff;
       stroke-width: 1px;
-      r: 5;
+      r: v-bind(anchorRadius);
     }
     // 矩形
     .RECT {
@@ -1569,7 +2173,7 @@ defineExpose({
       fill: rgba(255, 255, 0, 1);
       stroke: #fff;
       stroke-width: 1px;
-      r: 5;
+      r: v-bind(anchorRadius);
     }
   }
 }
