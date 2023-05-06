@@ -324,7 +324,11 @@ onMounted(async () => {
       },
       // 监听删除形状
       onRemove: (shape) => {
-        state.shapes = state.shapes.filter((item) => item.id !== shape.id)
+        for (const i in state.shapes) {
+          if (state.shapes[i].id === shape.id) {
+            state.shapes.splice(i, 1)
+          }
+        }
       },
       // 监听更新形状
       onUpdate: (shape) => {

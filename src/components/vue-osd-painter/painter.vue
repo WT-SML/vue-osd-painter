@@ -13,6 +13,7 @@ import {
   createGlobalState,
   useMouseInElement,
   useMousePressed,
+  onKeyStroke,
 } from "@vueuse/core"
 import { lineAngle, pointRotate, pointInPolygon, lineLength } from "geometric"
 import RBush from "rbush"
@@ -21,6 +22,18 @@ import _ from "lodash"
 const props = defineProps({
   viewer: Object, // osd 查看器
   shapes: Array, // 需要渲染的形状数组
+})
+
+onKeyStroke(["Delete"], async (e) => {
+  switch (e.code) {
+    case "Delete":
+      if (state.tempShape && state.tempShape.id) {
+        emits("remove", state.tempShape)
+      }
+      break
+    default:
+      break
+  }
 })
 
 const anchorRadius = 5 // 锚点半径
@@ -183,8 +196,12 @@ const hoverShape = computed(() => {
   // 外接矩形的粗略命中
   const cursoryHitBounds = state.shapesBounds.search(mouseBounds)
   // 详细的命中
+  const shapes = [...computedShapes.value]
+  if (state.tempShape && state.tempShape.id) {
+    shapes.push(state.tempShape)
+  }
   const detailedHitBounds = cursoryHitBounds.filter((bounds) => {
-    const shape = props.shapes.filter((item) => item.id === bounds.id)[0]
+    const shape = shapes.filter((item) => item.id === bounds.id)[0]
     if (shape.type === state.tools.POINT) {
       return true
     }
@@ -193,16 +210,14 @@ const hoverShape = computed(() => {
   // 返回详细命中中的面积最小的那一个
   if (detailedHitBounds.length) {
     if (detailedHitBounds.length === 1) {
-      return props.shapes.filter(
-        (item) => item.id === detailedHitBounds[0].id
-      )[0]
+      return shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
     }
     detailedHitBounds.sort((a, b) => {
-      const shapeA = props.shapes.filter((item) => item.id === a.id)[0]
-      const shapeB = props.shapes.filter((item) => item.id === b.id)[0]
+      const shapeA = shapes.filter((item) => item.id === a.id)[0]
+      const shapeB = shapes.filter((item) => item.id === b.id)[0]
       return getShapeArea(shapeA) - getShapeArea(shapeB)
     })
-    return props.shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
+    return shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
   }
   return null
 })
@@ -273,7 +288,6 @@ const editAnchors = computed(() => {
     },
   }
   if (shapeGetAnchorsFuncMap[state.tempShape.type]) {
-    console.log(shapeGetAnchorsFuncMap[state.tempShape.type](state.tempShape))
     return shapeGetAnchorsFuncMap[state.tempShape.type](state.tempShape)
   }
   return null
@@ -1385,6 +1399,19 @@ watch(
   {
     deep: true,
   }
+)
+// 监听临时shape
+watch(
+  () => state.tempShape,
+  () => {
+    if (state.tempShape && state.tempShape.id) {
+      state.shapesBounds.remove(state.tempShape, (a, b) => {
+        return a.id === b.id
+      })
+      state.shapesBounds.insert(getBounds(state.tempShape))
+    }
+  },
+  { deep: true }
 )
 // 监听绘图模式
 watch(
