@@ -1890,6 +1890,12 @@ defineExpose({
             :x2="state.tempShape.meta.x2"
             :y2="state.tempShape.meta.y2"
           ></line>
+          <path
+            class="ARROW_LINE_APPENDAGE_ARROW"
+            :d="getArrowPath(state.tempShape)"
+            :transform="`scale(${1 / state.scale})`"
+            :transform-origin="`${state.tempShape.meta.x2} ${state.tempShape.meta.y2}`"
+          ></path>
           <!-- 锚点 -->
           <circle
             v-for="(item, i) in editAnchors"
@@ -2194,6 +2200,11 @@ defineExpose({
     .ARROW_LINE {
       stroke: #f00;
       stroke-width: 2px;
+    }
+    .ARROW_LINE_APPENDAGE_ARROW {
+      stroke: #f00;
+      stroke-width: 2px;
+      fill: none;
     }
     // 点
     .POINT {
