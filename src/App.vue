@@ -285,6 +285,23 @@ onMounted(async () => {
       meta: { cx: 6462.857142857143, cy: 3103.896103896105 },
     },
   ]
+  // for (let i = 0; i < 1000; i++) {
+  //   let randomNumberA = Math.floor(Math.random() * 10000)
+  //   let randomNumberB = Math.floor(Math.random() * 10000)
+  //   let randomNumberC = Math.floor(Math.random() * 1000)
+  //   state.shapes.push({
+  //     id: i,
+  //     // type: "POINT",
+  //     // meta: { cx: 6462.857142857143, cy: 3103.896103896105 },
+  //     type: "RECT",
+  //     meta: {
+  //       x: randomNumberA,
+  //       y: randomNumberB,
+  //       width: randomNumberC,
+  //       height: randomNumberC,
+  //     },
+  //   })
+  // }
   const osdConf = {
     id: "osd", // 容器 dom Id
     tileSources:
@@ -318,6 +335,8 @@ onMounted(async () => {
     const painterConf = {
       viewer: state.viewer, // osd 查看器
       shapes: state.shapes, // 需要渲染的形状
+      renderer: "canvas", // 渲染器：canvas or svg
+      // renderer: "svg", // 渲染器：canvas or svg
       // 监听新增形状
       onAdd: (shape) => {
         state.shapes.push(shape)

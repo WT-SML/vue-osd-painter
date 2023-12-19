@@ -1,4 +1,5 @@
 <script setup>
+// @ts-nocheck
 import osd from "openseadragon"
 import {
   onMounted,
@@ -22,7 +23,17 @@ import _ from "lodash"
 const props = defineProps({
   viewer: Object, // osd 查看器
   shapes: Array, // 需要渲染的形状数组
+  renderer: {
+    type: String,
+    default: "canvas",
+  },
 })
+
+const lineWidth = 2 //边框宽度
+const strokeStyle = "#F00" // 边线颜色
+const fillStyle = "#F00" // 边线颜色
+const anchorRadius = 5 // 锚点半径
+const anchorRadiusLarge = 6 // 更大的锚点半径
 
 onKeyStroke(["Delete"], async (e) => {
   switch (e.code) {
@@ -36,11 +47,9 @@ onKeyStroke(["Delete"], async (e) => {
   }
 })
 
-const anchorRadius = 5 // 锚点半径
-const anchorRadiusLarge = 6 // 更大的锚点半径
-
 const emits = defineEmits(["add", "remove", "update"])
 
+const canvasRef = ref(null)
 const svgRef = ref(null)
 const svgRootGroupRef = ref(null)
 
@@ -48,7 +57,7 @@ const {
   elementX: mouseX,
   elementY: mouseY,
   isOutside: isMouseOutside,
-} = useMouseInElement(svgRef)
+} = useMouseInElement(props.renderer === "canvas" ? canvasRef : svgRef)
 
 const isLeftMousePressed = ref(false)
 
@@ -497,6 +506,8 @@ const state = reactive({
   mode: tools.MOVE, // 绘图模式
   scale: 1, // 比例
   shapesBounds, // 形状数组对应边界的映射
+  translate: null, // svg的平移（基于视口）
+  canvasTranslate: null, // canvas的平移（基于dzi）
 })
 
 let lastMouseDownTimestamp = 0 // 多边形工具下判断双击完成形状的时间戳
@@ -1395,6 +1406,7 @@ watch(
       })
       state.shapesBounds.insert(getBounds(newItem))
     }
+    updateTransform()
   },
   {
     deep: true,
@@ -1428,6 +1440,7 @@ watch(isLeftMousePressed, (newVal) => {
   } else {
     toolsMouseMap[state.mode].handleMouseUp()
   }
+  updateTransform()
 })
 
 // 监听鼠标位置
@@ -1479,9 +1492,152 @@ const updateTransform = () => {
   const scaleX = flipped ? -scaleY : scaleY
   const rotation = viewport.getRotation()
   state.scale = scaleY
+  state.translate = p
+  const canvasP = props.viewer.viewport.viewerElementToImageCoordinates(
+    new osd.Point(0, 0)
+  )
+  state.canvasTranslate = canvasP
   state.transform = `translate(${p.x}, ${p.y}) scale(${scaleX}, ${scaleY}) rotate(${rotation})`
+  if (props.renderer === "canvas") {
+    render()
+  }
 }
-
+const pointsToPath2D = (points, isClose = false) => {
+  const path = new Path2D()
+  for (const i in points) {
+    const point = points[i]
+    if (Number(i) === 0) {
+      path.moveTo(point.x, point.y)
+    } else {
+      path.lineTo(point.x, point.y)
+    }
+  }
+  if (isClose) path.closePath()
+  return path
+}
+// canvas 渲染
+const render = () => {
+  const viewer = props.viewer
+  const viewport = viewer.viewport
+  const canvas = canvasRef.value
+  const viewportContainerSize = viewer.viewport.getContainerSize()
+  const canvasWidth = viewportContainerSize.x
+  const canvasHeight = viewportContainerSize.y
+  canvas.width = canvasWidth
+  canvas.height = canvasHeight
+  const ctx = canvas.getContext("2d")
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  const flipped = viewport.getFlip()
+  const scaleY = state.scale
+  const scaleX = flipped ? -scaleY : scaleY
+  ctx.scale(scaleY, scaleX)
+  ctx.translate(-state.canvasTranslate.x, -state.canvasTranslate.y)
+  // 渲染普通形状
+  for (const item of computedShapes.value) {
+    // 矩形
+    if (item.type === state.tools.RECT) {
+      const { x, y, width, height } = item.meta
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      ctx.strokeRect(x, y, width, height)
+    } else if (item.type === state.tools.POLYGON) {
+      // 多边形
+      const { points } = item.meta
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      ctx.stroke(pointsToPath2D(points, true))
+    } else if (item.type === state.tools.CIRCLE) {
+      // 圆
+      const { cx, cy, rx, ry } = item.meta
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      // 开始绘制路径
+      ctx.beginPath()
+      // 绘制圆
+      // arc(x, y, radius, startAngle, endAngle, anticlockwise)
+      ctx.arc(cx, cy, rx, 0, 2 * Math.PI) // 从 0 弧度到 2π 弧度，即完整的圆
+      // 闭合路径
+      ctx.closePath()
+      // 描边路径，不填充
+      ctx.stroke()
+    } else if (item.type === state.tools.ELLIPSE) {
+      // 椭圆
+      const { cx, cy, rx, ry } = item.meta
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      // 开始绘制路径
+      ctx.beginPath()
+      // 绘制椭圆
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, false)
+      // 闭合路径
+      // ctx.closePath()
+      // 描边路径，不填充
+      ctx.stroke()
+    } else if (item.type === state.tools.PATH) {
+      // 路径
+      const { d } = item.meta
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      ctx.stroke(pointsToPath2D(d))
+    } else if (item.type === state.tools.CLOSED_PATH) {
+      // 闭合路径
+      const { d } = item.meta
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      ctx.stroke(pointsToPath2D(d, true))
+    } else if (item.type === state.tools.LINE) {
+      // 直线
+      const { x1, y1, x2, y2 } = item.meta
+      const points = [
+        {
+          x: x1,
+          y: y1,
+        },
+        {
+          x: x2,
+          y: y2,
+        },
+      ]
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      ctx.stroke(pointsToPath2D(points))
+    } else if (item.type === state.tools.ARROW_LINE) {
+      // 箭头直线
+      const { x1, y1, x2, y2 } = item.meta
+      const points = [
+        {
+          x: x1,
+          y: y1,
+        },
+        {
+          x: x2,
+          y: y2,
+        },
+      ]
+      ctx.lineWidth = lineWidth / scaleY
+      ctx.strokeStyle = strokeStyle
+      ctx.stroke(pointsToPath2D(points))
+      ctx.stroke(pointsToPath2D(getArrowPathForCanvas(item, scaleY)))
+    } else if (item.type === state.tools.POINT) {
+      // 点
+      const { cx, cy } = item.meta
+      ctx.lineWidth = 4 / scaleY
+      ctx.strokeStyle = "#fff"
+      ctx.fillStyle = fillStyle
+      // 开始绘制路径
+      ctx.beginPath()
+      // 绘制圆
+      // arc(x, y, radius, startAngle, endAngle, anticlockwise)
+      ctx.arc(cx, cy, anchorRadius / scaleY, 0, 2 * Math.PI) // 从 0 弧度到 2π 弧度，即完整的圆
+      // 闭合路径
+      ctx.closePath()
+      ctx.stroke()
+      ctx.fill()
+    }
+  }
+  // 渲染新增形状
+  // 渲染编辑形状
+}
 // 获取箭头的path
 const getArrowPath = (shape) => {
   const startPoint = [shape.meta.x1, shape.meta.y1]
@@ -1491,6 +1647,29 @@ const getArrowPath = (shape) => {
   const pointA = pointRotate(referencePoint, angle + 90 + 30, endPoint)
   const pointB = pointRotate(referencePoint, angle + 90 - 30, endPoint)
   return `M${pointA[0]} ${pointA[1]} L${endPoint[0]} ${endPoint[1]} L${pointB[0]} ${pointB[1]}`
+}
+// 获取箭头的path （canvas专属）
+const getArrowPathForCanvas = (shape, scale) => {
+  const startPoint = [shape.meta.x1, shape.meta.y1]
+  const endPoint = [shape.meta.x2, shape.meta.y2]
+  const angle = lineAngle([startPoint, endPoint])
+  const referencePoint = [endPoint[0], endPoint[1] + 10 / scale]
+  const pointA = pointRotate(referencePoint, angle + 90 + 30, endPoint)
+  const pointB = pointRotate(referencePoint, angle + 90 - 30, endPoint)
+  return [
+    {
+      x: pointA[0],
+      y: pointA[1],
+    },
+    {
+      x: endPoint[0],
+      y: endPoint[1],
+    },
+    {
+      x: pointB[0],
+      y: pointB[1],
+    },
+  ]
 }
 
 // 处理右键菜单
@@ -1504,7 +1683,7 @@ onMounted(() => {
   listenForViewerEvents()
   // 创建一个鼠标跟踪器
   const tracker = new osd.MouseTracker({
-    element: svgRef.value,
+    element: props.renderer === "canvas" ? canvasRef.value : svgRef.value,
     pressHandler: (e) => {
       isLeftMousePressed.value = true
     },
@@ -1540,7 +1719,13 @@ defineExpose({
     isLeftMousePressed：{{ isLeftMousePressed }} <br />
     hoverShapeId：{{ hoverShape?.id ?? "-" }}<br />
   </div>
+  <canvas
+    v-if="renderer === 'canvas'"
+    ref="canvasRef"
+    class="canvas-painter"
+  ></canvas>
   <svg
+    v-else
     ref="svgRef"
     :class="['painter', hoverShape ? 'CP' : '']"
     @contextmenu="handleContextmenu"
@@ -1924,6 +2109,13 @@ defineExpose({
 </template>
 
 <style lang="scss" scoped>
+.canvas-painter {
+  position: absolute;
+  top: 0;
+  left: 0;
+  user-select: none;
+  border: 1px solid #000;
+}
 .temp-panel {
   position: fixed;
   bottom: 0;
