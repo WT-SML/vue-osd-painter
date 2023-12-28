@@ -12,7 +12,7 @@
     "@vueuse/core": "^9.12.0",
     "geometric": "^2.5.0",
     "lodash": "^4.17.21",
-    "openseadragon": "^4.0.0",
+    "openseadragon": "^4.1.0",
     "rbush": "^3.0.1",
     "vue": "^3.2.45"
   },

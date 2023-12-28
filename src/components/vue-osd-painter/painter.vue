@@ -22,18 +22,33 @@ import _ from "lodash"
 
 const props = defineProps({
   viewer: Object, // osd 查看器
-  shapes: Array, // 需要渲染的形状数组
+  shapes: Array, // 图形列表 支持响应式
+  // 渲染器
   renderer: {
     type: String,
     default: "canvas",
   },
+  // 巨量点标注模式
+  enormousAmountPointsMode: {
+    type: Boolean,
+    default: false,
+  },
 })
 
-const lineWidth = 2 //边框宽度
-const strokeStyle = "#F00" // 边线颜色
-const fillStyle = "#F00" // 边线颜色
+const isCanvas = computed(() => props.renderer === "canvas")
+const isEnormousAmountPointsMode = computed(
+  () => props.enormousAmountPointsMode
+)
+
+const lineWidth = 2 // 边线宽度
+const hoverLineWidth = 3 // 悬浮时边线宽度
+const strokeStyle = "rgba(238, 120, 0, 1)" // 边线颜色
+const hoverOrSelectedFillStyle = "rgba(238, 120, 0, 0.2)" // 悬浮或者选中时填充颜色
 const anchorRadius = 5 // 锚点半径
 const anchorRadiusLarge = 6 // 更大的锚点半径
+const anchorFillStyle = "rgba(254, 220, 94, 1)" // 锚点填充颜色
+const anchorStrokeStyle = "rgba(30, 39, 50, 1)" // 锚点边线颜色
+const anchorLineWidth = 2 // 锚点边线宽度
 
 onKeyStroke(["Delete"], async (e) => {
   switch (e.code) {
@@ -57,7 +72,7 @@ const {
   elementX: mouseX,
   elementY: mouseY,
   isOutside: isMouseOutside,
-} = useMouseInElement(props.renderer === "canvas" ? canvasRef : svgRef)
+} = useMouseInElement(isCanvas.value ? canvasRef : svgRef)
 
 const isLeftMousePressed = ref(false)
 
@@ -210,8 +225,8 @@ const hoverShape = computed(() => {
     shapes.push(state.tempShape)
   }
   const detailedHitBounds = cursoryHitBounds.filter((bounds) => {
-    const shape = shapes.filter((item) => item.id === bounds.id)[0]
-    if (shape.type === state.tools.POINT) {
+    const shape = shapes.find((item) => item.id === bounds.id)
+    if (shape?.type === state.tools.POINT) {
       return true
     }
     return pointInShape({ x, y }, shape, buffer)
@@ -219,14 +234,14 @@ const hoverShape = computed(() => {
   // 返回详细命中中的面积最小的那一个
   if (detailedHitBounds.length) {
     if (detailedHitBounds.length === 1) {
-      return shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
+      return shapes.find((item) => item.id === detailedHitBounds[0].id)
     }
     detailedHitBounds.sort((a, b) => {
-      const shapeA = shapes.filter((item) => item.id === a.id)[0]
-      const shapeB = shapes.filter((item) => item.id === b.id)[0]
+      const shapeA = shapes.find((item) => item.id === a.id)
+      const shapeB = shapes.find((item) => item.id === b.id)
       return getShapeArea(shapeA) - getShapeArea(shapeB)
     })
-    return shapes.filter((item) => item.id === detailedHitBounds[0].id)[0]
+    return shapes.find((item) => item.id === detailedHitBounds[0].id)
   }
   return null
 })
@@ -393,6 +408,9 @@ const shapeTypeGetShapeAreaFuncMap = {
 }
 // 点是否在shape内
 const pointInShape = (point, shape, buffer) => {
+  if (!shape) {
+    return false
+  }
   return shapeTypePointInShapeFuncMap[shape.type](point, shape, buffer)
 }
 const shapeTypePointInShapeFuncMap = {
@@ -495,8 +513,12 @@ const tools = {
   LINE: "LINE", // 直线
   ARROW_LINE: "ARROW_LINE", // 箭头直线
   POINT: "POINT", // 点
-  MULTISELECT: "MULTISELECT", // 多选
-  EXCLUSION: "EXCLUSION", // 排除
+  // MULTISELECT: "MULTISELECT", // 多选
+  // EXCLUSION: "EXCLUSION", // 排除
+}
+
+const setMode = (mode) => {
+  state.mode = mode
 }
 
 const state = reactive({
@@ -1425,6 +1447,22 @@ watch(
   },
   { deep: true }
 )
+// 监听hoverShape
+watch(
+  hoverShape,
+  () => {
+    updateTransform()
+  },
+  { deep: true }
+)
+// 监听临时shape
+watch(
+  () => state.tempShape,
+  () => {
+    updateTransform()
+  },
+  { deep: true }
+)
 // 监听绘图模式
 watch(
   () => state.mode,
@@ -1442,7 +1480,6 @@ watch(isLeftMousePressed, (newVal) => {
   }
   updateTransform()
 })
-
 // 监听鼠标位置
 watch([mouseX, mouseY], () => {
   toolsMouseMap[state.mode].handleMouseMove()
@@ -1498,7 +1535,7 @@ const updateTransform = () => {
   )
   state.canvasTranslate = canvasP
   state.transform = `translate(${p.x}, ${p.y}) scale(${scaleX}, ${scaleY}) rotate(${rotation})`
-  if (props.renderer === "canvas") {
+  if (isCanvas.value) {
     render()
   }
 }
@@ -1515,11 +1552,155 @@ const pointsToPath2D = (points, isClose = false) => {
   if (isClose) path.closePath()
   return path
 }
+// 渲染图形
+const drawShape = (ctx, shape, isAdd = false) => {
+  if (shape.type === state.tools.POINT) {
+    ctx.lineWidth = anchorLineWidth / state.scale
+    ctx.strokeStyle = anchorStrokeStyle
+    if (state.tempShape?.id === shape.id) {
+      ctx.fillStyle = anchorFillStyle
+    } else {
+      ctx.fillStyle = strokeStyle
+    }
+  } else {
+    ctx.lineWidth =
+      (hoverShape.value?.id === shape.id ? hoverLineWidth : lineWidth) /
+      state.scale
+    ctx.strokeStyle = strokeStyle
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fillStyle = hoverOrSelectedFillStyle
+    } else {
+      ctx.fillStyle = null
+    }
+  }
+  if (shape.type === state.tools.RECT) {
+    // 矩形
+    const { x, y, width, height } = shape.meta
+    ctx.strokeRect(x, y, width, height)
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fillRect(x, y, width, height)
+    }
+  } else if (shape.type === state.tools.POLYGON) {
+    // 多边形
+    const { points } = shape.meta
+    ctx.stroke(pointsToPath2D(points, !isAdd))
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fill(pointsToPath2D(points))
+    }
+  } else if (shape.type === state.tools.CIRCLE) {
+    // 圆
+    const { cx, cy, rx, ry } = shape.meta
+    ctx.beginPath()
+    ctx.arc(cx, cy, rx, 0, Math.PI * 2)
+    ctx.closePath()
+    ctx.stroke()
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fill()
+    }
+  } else if (shape.type === state.tools.ELLIPSE) {
+    // 椭圆
+    const { cx, cy, rx, ry } = shape.meta
+    ctx.beginPath()
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, false)
+    ctx.stroke()
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fill()
+    }
+  } else if (shape.type === state.tools.PATH) {
+    // 路径
+    const { d } = shape.meta
+    ctx.stroke(pointsToPath2D(d))
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fill(pointsToPath2D(d))
+    }
+  } else if (shape.type === state.tools.CLOSED_PATH) {
+    // 闭合路径
+    const { d } = shape.meta
+    ctx.stroke(pointsToPath2D(d, !isAdd))
+    if (state.tempShape?.id === shape.id || hoverShape.value?.id === shape.id) {
+      ctx.fill(pointsToPath2D(d))
+    }
+  } else if (shape.type === state.tools.LINE) {
+    // 直线
+    const { x1, y1, x2, y2 } = shape.meta
+    const points = [
+      {
+        x: x1,
+        y: y1,
+      },
+      {
+        x: x2,
+        y: y2,
+      },
+    ]
+    ctx.stroke(pointsToPath2D(points))
+  } else if (shape.type === state.tools.ARROW_LINE) {
+    // 箭头直线
+    const { x1, y1, x2, y2 } = shape.meta
+    const points = [
+      {
+        x: x1,
+        y: y1,
+      },
+      {
+        x: x2,
+        y: y2,
+      },
+    ]
+    ctx.stroke(pointsToPath2D(points))
+    ctx.stroke(pointsToPath2D(getArrowPathForCanvas(shape, state.scale)))
+  } else if (shape.type === state.tools.POINT) {
+    const { cx, cy } = shape.meta
+    // 点
+    if (isEnormousAmountPointsMode.value) {
+      // 如果是巨量点标注模式
+      const width = Math.floor((anchorRadius * 2) / state.scale)
+      const height = Math.floor((anchorRadius * 2) / state.scale)
+      ctx.fillRect(
+        Math.floor(cx - width / 2),
+        Math.floor(cy - height / 2),
+        width,
+        height
+      )
+    } else {
+      ctx.beginPath()
+      ctx.arc(
+        cx,
+        cy,
+        (hoverShape.value?.id === shape.id ? anchorRadiusLarge : anchorRadius) /
+          state.scale,
+        0,
+        2 * Math.PI
+      )
+      ctx.closePath()
+      ctx.stroke()
+      ctx.fill()
+    }
+  }
+}
+// 渲染编辑锚点
+const drawEditAnchors = (ctx) => {
+  if (!editAnchors.value) return
+  for (const v of editAnchors.value) {
+    const { x, y } = v
+    ctx.lineWidth = anchorLineWidth / state.scale
+    ctx.strokeStyle = anchorStrokeStyle
+    ctx.fillStyle = anchorFillStyle
+    ctx.beginPath()
+    ctx.arc(x, y, anchorRadius / state.scale, 0, 2 * Math.PI)
+    ctx.closePath()
+    ctx.stroke()
+    ctx.fill()
+  }
+}
 // canvas 渲染
 const render = () => {
   const viewer = props.viewer
   const viewport = viewer.viewport
   const canvas = canvasRef.value
+  if (!canvas) {
+    return
+  }
   const viewportContainerSize = viewer.viewport.getContainerSize()
   const canvasWidth = viewportContainerSize.x
   const canvasHeight = viewportContainerSize.y
@@ -1533,110 +1714,38 @@ const render = () => {
   ctx.scale(scaleY, scaleX)
   ctx.translate(-state.canvasTranslate.x, -state.canvasTranslate.y)
   // 渲染普通形状
-  for (const item of computedShapes.value) {
-    // 矩形
-    if (item.type === state.tools.RECT) {
-      const { x, y, width, height } = item.meta
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      ctx.strokeRect(x, y, width, height)
-    } else if (item.type === state.tools.POLYGON) {
-      // 多边形
-      const { points } = item.meta
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      ctx.stroke(pointsToPath2D(points, true))
-    } else if (item.type === state.tools.CIRCLE) {
-      // 圆
-      const { cx, cy, rx, ry } = item.meta
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      // 开始绘制路径
+  for (const shape of computedShapes.value) {
+    drawShape(ctx, shape)
+  }
+  // 渲染新增形状
+  if (state.tempShape?.id === null) {
+    drawShape(ctx, state.tempShape, true)
+    if (state.tempShape.type === state.tools.POLYGON) {
+      // 闭合提示锚点
+      ctx.lineWidth = anchorLineWidth / scaleY
+      ctx.strokeStyle = anchorStrokeStyle
+      ctx.fillStyle = anchorFillStyle
       ctx.beginPath()
-      // 绘制圆
-      // arc(x, y, radius, startAngle, endAngle, anticlockwise)
-      ctx.arc(cx, cy, rx, 0, 2 * Math.PI) // 从 0 弧度到 2π 弧度，即完整的圆
-      // 闭合路径
-      ctx.closePath()
-      // 描边路径，不填充
-      ctx.stroke()
-    } else if (item.type === state.tools.ELLIPSE) {
-      // 椭圆
-      const { cx, cy, rx, ry } = item.meta
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      // 开始绘制路径
-      ctx.beginPath()
-      // 绘制椭圆
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2, false)
-      // 闭合路径
-      // ctx.closePath()
-      // 描边路径，不填充
-      ctx.stroke()
-    } else if (item.type === state.tools.PATH) {
-      // 路径
-      const { d } = item.meta
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      ctx.stroke(pointsToPath2D(d))
-    } else if (item.type === state.tools.CLOSED_PATH) {
-      // 闭合路径
-      const { d } = item.meta
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      ctx.stroke(pointsToPath2D(d, true))
-    } else if (item.type === state.tools.LINE) {
-      // 直线
-      const { x1, y1, x2, y2 } = item.meta
-      const points = [
-        {
-          x: x1,
-          y: y1,
-        },
-        {
-          x: x2,
-          y: y2,
-        },
-      ]
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      ctx.stroke(pointsToPath2D(points))
-    } else if (item.type === state.tools.ARROW_LINE) {
-      // 箭头直线
-      const { x1, y1, x2, y2 } = item.meta
-      const points = [
-        {
-          x: x1,
-          y: y1,
-        },
-        {
-          x: x2,
-          y: y2,
-        },
-      ]
-      ctx.lineWidth = lineWidth / scaleY
-      ctx.strokeStyle = strokeStyle
-      ctx.stroke(pointsToPath2D(points))
-      ctx.stroke(pointsToPath2D(getArrowPathForCanvas(item, scaleY)))
-    } else if (item.type === state.tools.POINT) {
-      // 点
-      const { cx, cy } = item.meta
-      ctx.lineWidth = 4 / scaleY
-      ctx.strokeStyle = "#fff"
-      ctx.fillStyle = fillStyle
-      // 开始绘制路径
-      ctx.beginPath()
-      // 绘制圆
-      // arc(x, y, radius, startAngle, endAngle, anticlockwise)
-      ctx.arc(cx, cy, anchorRadius / scaleY, 0, 2 * Math.PI) // 从 0 弧度到 2π 弧度，即完整的圆
-      // 闭合路径
+      ctx.arc(
+        state.tempShape.meta.points[0].x,
+        state.tempShape.meta.points[0].y,
+
+        (isPolygonToolToStartPointTooClose.value
+          ? anchorRadiusLarge
+          : anchorRadius) / scaleY,
+        0,
+        2 * Math.PI
+      )
       ctx.closePath()
       ctx.stroke()
       ctx.fill()
     }
   }
-  // 渲染新增形状
   // 渲染编辑形状
+  if (state.tempShape?.id) {
+    drawShape(ctx, state.tempShape)
+    drawEditAnchors(ctx)
+  }
 }
 // 获取箭头的path
 const getArrowPath = (shape) => {
@@ -1671,19 +1780,17 @@ const getArrowPathForCanvas = (shape, scale) => {
     },
   ]
 }
-
 // 处理右键菜单
 const handleContextmenu = (e) => {
   e.preventDefault()
 }
-
 // 挂载
 onMounted(() => {
   updateTransform()
   listenForViewerEvents()
   // 创建一个鼠标跟踪器
   const tracker = new osd.MouseTracker({
-    element: props.renderer === "canvas" ? canvasRef.value : svgRef.value,
+    element: isCanvas.value ? canvasRef.value : svgRef.value,
     pressHandler: (e) => {
       isLeftMousePressed.value = true
     },
@@ -1698,36 +1805,55 @@ onMounted(() => {
   // 启用鼠标跟踪器
   tracker.setTracking(true)
 })
-
 // 卸载
 onUnmounted(() => {})
-
+// 调试信息
+const debug = {
+  mouseX,
+  mouseY,
+  dziCoordByMouse,
+  isMouseOutside,
+  isLeftMousePressed,
+  hoverShape,
+  hoverAnchor,
+}
+// 移动到某个标注
+const panTo = (shape) => {
+  const bounds = getBounds(shape)
+  const center = {
+    x: (bounds.maxX + bounds.minX) / 2,
+    y: (bounds.maxY + bounds.minY) / 2,
+  }
+  props.viewer.viewport.panTo(
+    props.viewer.viewport.imageToViewportCoordinates(center.x, center.y)
+  )
+}
+// 选中shape
+const select = (shape) => {
+  state.tempShape = _.cloneDeep(shape)
+}
 // 暴露数据
 defineExpose({
   state,
+  tools,
+  debug,
+  setMode,
+  panTo,
+  select,
 })
 </script>
 
 <template>
-  <div class="temp-panel">
-    <strong>DEBUG</strong> <br />
-    mouseX：{{ mouseX }} <br />
-    mouseY：{{ mouseY }} <br />
-    dziCoordByMouseX：{{ dziCoordByMouse.x }}<br />
-    dziCoordByMouseY：{{ dziCoordByMouse.y }}<br />
-    isMouseOutside：{{ isMouseOutside }}<br />
-    isLeftMousePressed：{{ isLeftMousePressed }} <br />
-    hoverShapeId：{{ hoverShape?.id ?? "-" }}<br />
-  </div>
   <canvas
-    v-if="renderer === 'canvas'"
+    v-if="isCanvas"
     ref="canvasRef"
-    class="canvas-painter"
+    :class="['canvas-painter', hoverShape || hoverAnchor ? 'CP' : '']"
+    @contextmenu="handleContextmenu"
   ></canvas>
   <svg
     v-else
     ref="svgRef"
-    :class="['painter', hoverShape ? 'CP' : '']"
+    :class="['painter', hoverShape || hoverAnchor ? 'CP' : '']"
     @contextmenu="handleContextmenu"
   >
     <g ref="svgRootGroupRef" :transform="state.transform">
@@ -1933,7 +2059,13 @@ defineExpose({
         ></circle>
       </g>
       <!-- 编辑形状 -->
-      <g class="EDIT_GROUP" v-if="state.tempShape?.id">
+      <g
+        :class="[
+          `EDIT_GROUP`,
+          hoverShape?.id === state.tempShape?.id ? 'HOVER' : '',
+        ]"
+        v-if="state.tempShape?.id"
+      >
         <!-- 矩形 -->
         <template v-if="state.tempShape.type === state.tools.RECT">
           <!-- 本体 -->
@@ -2109,25 +2241,14 @@ defineExpose({
 </template>
 
 <style lang="scss" scoped>
+.CP {
+  cursor: pointer;
+}
 .canvas-painter {
   position: absolute;
   top: 0;
   left: 0;
   user-select: none;
-  border: 1px solid #000;
-}
-.temp-panel {
-  position: fixed;
-  bottom: 0;
-  right: 0;
-  border: 1px solid #ccc;
-  background-color: #ddd;
-  padding: 10px;
-  z-index: 999;
-  width: 400px;
-}
-.CP {
-  cursor: pointer;
 }
 .painter {
   position: absolute;
@@ -2149,141 +2270,99 @@ defineExpose({
   .RECT_GROUP {
     .RECT {
       fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 多边形
   .POLYGON_GROUP {
     .POLYGON {
       fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 圆
   .CIRCLE_GROUP {
     .CIRCLE {
       fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 椭圆
   .ELLIPSE_GROUP {
     .ELLIPSE {
       fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 路径
   .PATH_GROUP {
     .PATH {
       fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 闭合路径
   .CLOSED_PATH_GROUP {
     .CLOSED_PATH {
       fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 直线
   .LINE_GROUP {
     .LINE {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
   }
   // 箭头直线
   .ARROW_LINE_GROUP {
     .ARROW_LINE {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 附属箭头
     .ARROW_LINE_APPENDAGE_ARROW {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
       fill: none;
     }
   }
   // 点
   .POINT_GROUP {
     .POINT {
-      fill: rgba(255, 0, 0, 1);
-      stroke: #fff;
-      stroke-width: 1px;
+      fill: v-bind(strokeStyle);
+      stroke: v-bind(anchorStrokeStyle);
+      stroke-width: v-bind(anchorLineWidth);
       r: v-bind(anchorRadius);
     }
   }
-  // hover形状
-  .HOVER {
-    // 矩形
-    .RECT {
-      stroke-width: 3px;
-    }
-    // 多边形
-    .POLYGON {
-      stroke-width: 3px;
-    }
-    // 圆
-    .CIRCLE {
-      stroke-width: 3px;
-    }
-    // 椭圆
-    .ELLIPSE {
-      stroke-width: 3px;
-    }
-    // 路径
-    .PATH {
-      stroke-width: 3px;
-    }
-    // 闭合路径
-    .CLOSED_PATH {
-      stroke-width: 3px;
-    }
-    // 直线
-    .LINE {
-      stroke-width: 3px;
-    }
-    // 箭头直线
-    .ARROW_LINE {
-      stroke-width: 3px;
-    }
-    // 附属箭头
-    .ARROW_LINE_APPENDAGE_ARROW {
-      stroke-width: 3px;
-    }
-    // 点
-    .POINT {
-      r: v-bind(anchorRadiusLarge);
-    }
-  }
+
   // 新增形状
   .ADD_GROUP {
     // 矩形
     .RECT {
-      fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 多边形
     .POLYGON {
-      fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 附属锚点
     .POLYGON_APPENDAGE_ANCHOR {
-      fill: rgba(255, 255, 0, 1);
-      stroke: #fff;
-      stroke-width: 1px;
+      fill: v-bind(anchorFillStyle);
+      stroke: v-bind(anchorStrokeStyle);
+      stroke-width: v-bind(anchorLineWidth);
       r: v-bind(anchorRadius);
     }
     // 更大的附属锚点
@@ -2292,49 +2371,49 @@ defineExpose({
     }
     // 圆
     .CIRCLE {
-      fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 椭圆
     .ELLIPSE {
-      fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 路径
     .PATH {
-      fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 闭合路径
     .CLOSED_PATH {
-      fill: none;
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 直线
     .LINE {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 箭头直线
     .ARROW_LINE {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 附属箭头
     .ARROW_LINE_APPENDAGE_ARROW {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
       fill: none;
     }
     // 点
     .POINT {
-      fill: rgba(255, 0, 0, 1);
-      stroke: #fff;
-      stroke-width: 1px;
+      fill: v-bind(strokeStyle);
+      stroke: v-bind(anchorStrokeStyle);
+      stroke-width: v-bind(anchorLineWidth);
       r: v-bind(anchorRadius);
     }
   }
@@ -2342,68 +2421,111 @@ defineExpose({
   .EDIT_GROUP {
     // 锚点
     .ANCHOR {
-      fill: rgba(255, 255, 0, 1);
-      stroke: #fff;
-      stroke-width: 1px;
+      fill: v-bind(anchorFillStyle);
+      stroke: v-bind(anchorStrokeStyle);
+      stroke-width: v-bind(anchorLineWidth);
       r: v-bind(anchorRadius);
     }
     // 矩形
     .RECT {
-      fill: rgba(255, 0, 0, 0.2);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 多边形
     .POLYGON {
-      fill: rgba(255, 0, 0, 0.2);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 圆
     .CIRCLE {
-      fill: rgba(255, 0, 0, 0.2);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 椭圆
     .ELLIPSE {
-      fill: rgba(255, 0, 0, 0.2);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 路径
     .PATH {
-      fill: rgba(255, 0, 0, 0.2);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 闭合路径
     .CLOSED_PATH {
-      fill: rgba(255, 0, 0, 0.2);
-      stroke: #f00;
-      stroke-width: 2px;
+      fill: v-bind(hoverOrSelectedFillStyle);
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 直线
     .LINE {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     // 箭头直线
     .ARROW_LINE {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
     }
     .ARROW_LINE_APPENDAGE_ARROW {
-      stroke: #f00;
-      stroke-width: 2px;
+      stroke: v-bind(strokeStyle);
+      stroke-width: v-bind(lineWidth);
       fill: none;
     }
     // 点
     .POINT {
-      fill: rgba(255, 255, 0, 1);
-      stroke: #fff;
-      stroke-width: 1px;
+      fill: v-bind(anchorFillStyle);
+      stroke: v-bind(anchorStrokeStyle);
+      stroke-width: v-bind(anchorLineWidth);
       r: v-bind(anchorRadius);
+    }
+  }
+  // hover形状
+  .HOVER {
+    // 矩形
+    .RECT {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 多边形
+    .POLYGON {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 圆
+    .CIRCLE {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 椭圆
+    .ELLIPSE {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 路径
+    .PATH {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 闭合路径
+    .CLOSED_PATH {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 直线
+    .LINE {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 箭头直线
+    .ARROW_LINE {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 附属箭头
+    .ARROW_LINE_APPENDAGE_ARROW {
+      stroke-width: v-bind(hoverLineWidth);
+    }
+    // 点
+    .POINT {
+      r: v-bind(anchorRadiusLarge);
     }
   }
 }

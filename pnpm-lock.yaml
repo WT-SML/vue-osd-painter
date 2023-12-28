@@ -15,8 +15,8 @@ dependencies:
     specifier: ^4.17.21
     version: 4.17.21
   openseadragon:
-    specifier: ^4.0.0
-    version: 4.0.0
+    specifier: ^4.1.0
+    version: 4.1.0
   rbush:
     specifier: ^3.0.1
     version: 3.0.1
@@ -1094,8 +1094,8 @@ packages:
       wrappy: 1.0.2
     dev: true
 
-  /openseadragon@4.0.0:
-    resolution: {integrity: sha512-HsjSgqiiPwLkW5576GxDJ7Rax96iLUET8fnTsJvu7uYYkd+qzen3bflxHyph0OVVgZBKP9SpGH1nPdU4Mz0Z2A==}
+  /openseadragon@4.1.0:
+    resolution: {integrity: sha512-XMMzf5apmshvIvxvqMwiW9dJ07dol4zudvV1oFnoZuIpSZP3c3tlFjGbyOKHGhb1k4jmHQ7b7koG9vCHdKvC/A==}
     dev: false
 
   /optionator@0.9.1:

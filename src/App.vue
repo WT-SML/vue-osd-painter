@@ -1,389 +1,236 @@
 <script setup>
+// @ts-nocheck
 import osd from "openseadragon"
-import { onMounted, reactive } from "vue"
+import { onMounted, reactive, ref, computed } from "vue"
 import initPainter from "./components/vue-osd-painter"
+import { defaultShapes } from "./tools/default-shapes"
+import { defaultOsdConf } from "./tools/default-osd-conf"
+import { randomPoints } from "./tools"
+import _ from "lodash"
+
+const osdRef = ref(null) // osd dom
+
+// 模式和描述的映射
+const modeDescMap = computed(() => {
+  if (!state.painter) return {}
+  return {
+    [state.painter.tools.MOVE]: "移动",
+    [state.painter.tools.RECT]: "矩形",
+    [state.painter.tools.POLYGON]: "多边形",
+    [state.painter.tools.CIRCLE]: "圆",
+    [state.painter.tools.ELLIPSE]: "椭圆",
+    [state.painter.tools.PATH]: "路径",
+    [state.painter.tools.CLOSED_PATH]: "闭合路径",
+    [state.painter.tools.LINE]: "直线",
+    [state.painter.tools.ARROW_LINE]: "箭头直线",
+    [state.painter.tools.POINT]: "点",
+  }
+})
 
 const state = reactive({
   viewer: null, // osd 查看器
   painter: null, // 画家对象
-  // 绘制的图形
-  shapes: [],
+  shapes: [], // 图形列表
+  enormousAmountPointsMode: false, // 巨量点标注模式
 })
 
-onMounted(async () => {
-  state.shapes = [
-    {
-      id: 1677936439071,
-      type: "RECT",
-      meta: {
-        x: 4052.4675324675322,
-        y: 723.6363636363642,
-        width: 587.5324675324678,
-        height: 497.1428571428569,
-      },
+// 清空画布
+const clear = () => {
+  state.shapes.length = 0
+}
+// 开启巨量点标注模式
+const openEnormousAmountPointsMode = () => {
+  clear()
+  state.enormousAmountPointsMode = true
+  // 重置painter
+  resetPainter()
+  random10000Points()
+}
+// 随机生成10000个点标注
+const random10000Points = () => {
+  clear()
+  const points = randomPoints(state.viewer, 1000)
+  state.shapes.push(...points)
+}
+// 回到普通模式
+const backToNormalMode = () => {
+  clear()
+  state.enormousAmountPointsMode = false
+  // 重置painter
+  resetPainter()
+  state.shapes.push(..._.cloneDeep(defaultShapes))
+}
+// 重置painter
+const resetPainter = () => {
+  // 销毁
+  state.painter.destroy()
+  // 重新初始化
+  initializePainter()
+}
+// 初始化painter
+const initializePainter = () => {
+  // 秉承 vue 的思想，painter 的 shapes（要渲染的形状数组） 配置应该是响应式的数据，如此一来，你可以直接操作 shapes 数组，进而画布上的形状会随之更新
+  const painterConf = {
+    viewer: state.viewer, // osd 查看器
+    shapes: state.shapes, // 图形列表
+    renderer: "canvas", // 渲染器：canvas or svg
+    // renderer: "svg", // 渲染器：canvas or svg
+    enormousAmountPointsMode: state.enormousAmountPointsMode, // 是否开启巨量点标注模式（渲染器为canvas才支持，svg下不生效）
+    // 监听新增形状
+    onAdd: (shape) => {
+      state.shapes.push(shape)
     },
-    {
-      id: 1677936443098,
-      type: "POLYGON",
-      meta: {
-        points: [
-          { x: 5875.324675324675, y: 708.5714285714292 },
-          { x: 5453.506493506494, y: 1175.5844155844163 },
-          { x: 6221.818181818182, y: 1160.5194805194812 },
-        ],
-      },
+    // 监听删除形状
+    onRemove: (shape) => {
+      for (const i in state.shapes) {
+        if (state.shapes[i].id === shape.id) {
+          state.shapes.splice(i, 1)
+        }
+      }
     },
-    {
-      id: 1677936445985,
-      type: "CIRCLE",
-      meta: {
-        cx: 3382.0779220779223,
-        cy: 2071.948051948053,
-        rx: 323.89610389610357,
-        ry: 323.89610389610357,
-      },
+    // 监听更新形状
+    onUpdate: (shape) => {
+      for (const k in state.shapes) {
+        if (state.shapes[k].id === shape.id) {
+          state.shapes[k] = shape
+        }
+      }
     },
-    {
-      id: 1677936448991,
-      type: "ELLIPSE",
-      meta: {
-        cx: 4790.649350649351,
-        cy: 2094.545454545455,
-        rx: 662.8571428571431,
-        ry: 331.42857142857144,
-      },
-    },
-    {
-      id: 1677936451925,
-      type: "PATH",
-      meta: {
-        d: [
-          { x: 6041.038961038961, y: 1793.2467532467542 },
-          { x: 6041.038961038961, y: 1808.3116883116893 },
-          { x: 6056.103896103896, y: 1808.3116883116893 },
-          { x: 6056.103896103896, y: 1823.3766233766241 },
-          { x: 6056.103896103896, y: 1838.4415584415592 },
-          { x: 6056.103896103896, y: 1853.506493506494 },
-          { x: 6056.103896103896, y: 1868.571428571429 },
-          { x: 6056.103896103896, y: 1883.6363636363646 },
-          { x: 6056.103896103896, y: 1898.7012987012997 },
-          { x: 6071.168831168831, y: 1898.7012987012997 },
-          { x: 6071.168831168831, y: 1913.7662337662346 },
-          { x: 6071.168831168831, y: 1928.8311688311696 },
-          { x: 6071.168831168831, y: 1943.8961038961045 },
-          { x: 6071.168831168831, y: 1958.9610389610393 },
-          { x: 6071.168831168831, y: 1974.025974025975 },
-          { x: 6071.168831168831, y: 1989.0909090909101 },
-          { x: 6071.168831168831, y: 2004.155844155845 },
-          { x: 6071.168831168831, y: 2019.22077922078 },
-          { x: 6071.168831168831, y: 2034.285714285715 },
-          { x: 6071.168831168831, y: 2049.3506493506497 },
-          { x: 6071.168831168831, y: 2064.4155844155857 },
-          { x: 6071.168831168831, y: 2079.4805194805203 },
-          { x: 6071.168831168831, y: 2094.5454545454554 },
-          { x: 6071.168831168831, y: 2109.6103896103905 },
-          { x: 6071.168831168831, y: 2124.675324675325 },
-          { x: 6071.168831168831, y: 2139.74025974026 },
-          { x: 6071.168831168831, y: 2154.805194805196 },
-          { x: 6071.168831168831, y: 2169.8701298701308 },
-          { x: 6071.168831168831, y: 2184.935064935066 },
-          { x: 6071.168831168831, y: 2200.000000000001 },
-          { x: 6071.168831168831, y: 2215.0649350649355 },
-          { x: 6071.168831168831, y: 2230.1298701298706 },
-          { x: 6071.168831168831, y: 2245.1948051948057 },
-          { x: 6071.168831168831, y: 2260.259740259741 },
-          { x: 6071.168831168831, y: 2275.3246753246763 },
-          { x: 6071.168831168831, y: 2290.3896103896113 },
-          { x: 6086.233766233767, y: 2290.3896103896113 },
-          { x: 6101.298701298701, y: 2290.3896103896113 },
-          { x: 6101.298701298701, y: 2305.454545454546 },
-          { x: 6116.363636363636, y: 2305.454545454546 },
-          { x: 6131.428571428572, y: 2305.454545454546 },
-          { x: 6146.493506493506, y: 2305.454545454546 },
-          { x: 6161.558441558442, y: 2305.454545454546 },
-          { x: 6176.623376623377, y: 2305.454545454546 },
-          { x: 6191.688311688312, y: 2305.454545454546 },
-          { x: 6206.7532467532465, y: 2305.454545454546 },
-          { x: 6221.818181818182, y: 2305.454545454546 },
-          { x: 6236.883116883117, y: 2305.454545454546 },
-          { x: 6251.948051948051, y: 2305.454545454546 },
-          { x: 6267.012987012988, y: 2305.454545454546 },
-          { x: 6282.077922077922, y: 2305.454545454546 },
-          { x: 6297.142857142857, y: 2305.454545454546 },
-          { x: 6312.207792207792, y: 2305.454545454546 },
-          { x: 6327.272727272727, y: 2305.454545454546 },
-          { x: 6342.337662337662, y: 2305.454545454546 },
-          { x: 6357.402597402598, y: 2305.454545454546 },
-          { x: 6372.467532467533, y: 2305.454545454546 },
-          { x: 6387.532467532467, y: 2305.454545454546 },
-          { x: 6402.597402597403, y: 2305.454545454546 },
-          { x: 6417.662337662337, y: 2305.454545454546 },
-          { x: 6432.727272727272, y: 2305.454545454546 },
-          { x: 6447.7922077922085, y: 2305.454545454546 },
-          { x: 6462.857142857143, y: 2305.454545454546 },
-          { x: 6477.922077922078, y: 2305.454545454546 },
-          { x: 6477.922077922078, y: 2290.3896103896113 },
-          { x: 6492.987012987013, y: 2290.3896103896113 },
-          { x: 6508.051948051948, y: 2290.3896103896113 },
-          { x: 6523.1168831168825, y: 2290.3896103896113 },
-          { x: 6538.181818181819, y: 2290.3896103896113 },
-          { x: 6538.181818181819, y: 2275.3246753246763 },
-          { x: 6553.2467532467535, y: 2275.3246753246763 },
-          { x: 6568.311688311688, y: 2275.3246753246763 },
-          { x: 6583.376623376624, y: 2275.3246753246763 },
-          { x: 6583.376623376624, y: 2260.259740259741 },
-          { x: 6598.441558441558, y: 2260.259740259741 },
-          { x: 6613.506493506493, y: 2260.259740259741 },
-          { x: 6628.571428571428, y: 2260.259740259741 },
-          { x: 6643.636363636364, y: 2260.259740259741 },
-          { x: 6658.701298701299, y: 2260.259740259741 },
-          { x: 6673.766233766234, y: 2260.259740259741 },
-          { x: 6673.766233766234, y: 2245.1948051948057 },
-        ],
-      },
-    },
-    {
-      id: 1677936455329,
-      type: "CLOSED_PATH",
-      meta: {
-        d: [
-          { x: 7306.493506493506, y: 1778.1818181818194 },
-          { x: 7306.493506493506, y: 1793.2467532467542 },
-          { x: 7306.493506493506, y: 1808.3116883116893 },
-          { x: 7306.493506493506, y: 1823.3766233766241 },
-          { x: 7306.493506493506, y: 1838.4415584415592 },
-          { x: 7306.493506493506, y: 1853.506493506494 },
-          { x: 7306.493506493506, y: 1868.571428571429 },
-          { x: 7306.493506493506, y: 1883.6363636363646 },
-          { x: 7306.493506493506, y: 1898.7012987012997 },
-          { x: 7306.493506493506, y: 1913.7662337662346 },
-          { x: 7306.493506493506, y: 1928.8311688311696 },
-          { x: 7306.493506493506, y: 1943.8961038961045 },
-          { x: 7306.493506493506, y: 1958.9610389610393 },
-          { x: 7306.493506493506, y: 1974.025974025975 },
-          { x: 7306.493506493506, y: 1989.0909090909101 },
-          { x: 7306.493506493506, y: 2004.155844155845 },
-          { x: 7306.493506493506, y: 2019.22077922078 },
-          { x: 7306.493506493506, y: 2034.285714285715 },
-          { x: 7306.493506493506, y: 2049.3506493506497 },
-          { x: 7306.493506493506, y: 2064.4155844155857 },
-          { x: 7306.493506493506, y: 2079.4805194805203 },
-          { x: 7306.493506493506, y: 2094.5454545454554 },
-          { x: 7306.493506493506, y: 2109.6103896103905 },
-          { x: 7306.493506493506, y: 2124.675324675325 },
-          { x: 7306.493506493506, y: 2139.74025974026 },
-          { x: 7306.493506493506, y: 2154.805194805196 },
-          { x: 7306.493506493506, y: 2169.8701298701308 },
-          { x: 7306.493506493506, y: 2184.935064935066 },
-          { x: 7306.493506493506, y: 2200.000000000001 },
-          { x: 7306.493506493506, y: 2215.0649350649355 },
-          { x: 7306.493506493506, y: 2230.1298701298706 },
-          { x: 7306.493506493506, y: 2245.1948051948057 },
-          { x: 7306.493506493506, y: 2260.259740259741 },
-          { x: 7306.493506493506, y: 2275.3246753246763 },
-          { x: 7306.493506493506, y: 2290.3896103896113 },
-          { x: 7306.493506493506, y: 2305.454545454546 },
-          { x: 7306.493506493506, y: 2320.519480519481 },
-          { x: 7306.493506493506, y: 2335.584415584416 },
-          { x: 7306.493506493506, y: 2350.6493506493516 },
-          { x: 7321.558441558442, y: 2350.6493506493516 },
-          { x: 7336.623376623377, y: 2350.6493506493516 },
-          { x: 7351.688311688312, y: 2350.6493506493516 },
-          { x: 7366.753246753247, y: 2350.6493506493516 },
-          { x: 7381.818181818181, y: 2350.6493506493516 },
-          { x: 7396.8831168831175, y: 2350.6493506493516 },
-          { x: 7411.948051948051, y: 2350.6493506493516 },
-          { x: 7427.012987012987, y: 2350.6493506493516 },
-          { x: 7442.077922077923, y: 2350.6493506493516 },
-          { x: 7457.142857142857, y: 2350.6493506493516 },
-          { x: 7472.207792207792, y: 2350.6493506493516 },
-          { x: 7487.272727272727, y: 2350.6493506493516 },
-          { x: 7502.337662337663, y: 2350.6493506493516 },
-          { x: 7517.402597402596, y: 2350.6493506493516 },
-          { x: 7517.402597402596, y: 2335.584415584416 },
-          { x: 7532.467532467533, y: 2335.584415584416 },
-          { x: 7547.532467532468, y: 2335.584415584416 },
-          { x: 7562.597402597402, y: 2335.584415584416 },
-          { x: 7577.662337662338, y: 2335.584415584416 },
-          { x: 7592.727272727272, y: 2335.584415584416 },
-          { x: 7592.727272727272, y: 2320.519480519481 },
-          { x: 7607.792207792208, y: 2320.519480519481 },
-          { x: 7622.857142857144, y: 2320.519480519481 },
-          { x: 7637.922077922078, y: 2320.519480519481 },
-          { x: 7652.987012987013, y: 2320.519480519481 },
-          { x: 7668.051948051948, y: 2320.519480519481 },
-          { x: 7683.116883116883, y: 2320.519480519481 },
-          { x: 7698.181818181817, y: 2320.519480519481 },
-          { x: 7713.2467532467535, y: 2320.519480519481 },
-          { x: 7728.311688311689, y: 2320.519480519481 },
-          { x: 7743.376623376623, y: 2320.519480519481 },
-          { x: 7743.376623376623, y: 2305.454545454546 },
-          { x: 7758.441558441559, y: 2305.454545454546 },
-          { x: 7773.506493506493, y: 2305.454545454546 },
-          { x: 7788.571428571428, y: 2305.454545454546 },
-          { x: 7803.636363636363, y: 2305.454545454546 },
-          { x: 7803.636363636363, y: 2290.3896103896113 },
-          { x: 7818.701298701299, y: 2290.3896103896113 },
-          { x: 7833.766233766234, y: 2290.3896103896113 },
-          { x: 7848.831168831169, y: 2290.3896103896113 },
-          { x: 7848.831168831169, y: 2275.3246753246763 },
-          { x: 7863.896103896104, y: 2275.3246753246763 },
-          { x: 7878.961038961038, y: 2275.3246753246763 },
-          { x: 7894.025974025974, y: 2275.3246753246763 },
-          { x: 7894.025974025974, y: 2260.259740259741 },
-          { x: 7909.09090909091, y: 2260.259740259741 },
-          { x: 7924.155844155844, y: 2260.259740259741 },
-          { x: 7924.155844155844, y: 2245.1948051948057 },
-          { x: 7939.22077922078, y: 2245.1948051948057 },
-          { x: 7954.285714285714, y: 2245.1948051948057 },
-          { x: 7969.350649350649, y: 2230.1298701298706 },
-          { x: 7984.415584415584, y: 2215.0649350649355 },
-          { x: 7999.480519480519, y: 2215.0649350649355 },
-          { x: 7999.480519480519, y: 2200.000000000001 },
-          { x: 8014.545454545455, y: 2200.000000000001 },
-          { x: 8014.545454545455, y: 2184.935064935066 },
-          { x: 8029.61038961039, y: 2184.935064935066 },
-          { x: 8029.61038961039, y: 2169.8701298701308 },
-          { x: 8029.61038961039, y: 2154.805194805196 },
-          { x: 8044.675324675325, y: 2154.805194805196 },
-          { x: 8044.675324675325, y: 2139.74025974026 },
-          { x: 8044.675324675325, y: 2124.675324675325 },
-          { x: 8044.675324675325, y: 2109.6103896103905 },
-          { x: 8044.675324675325, y: 2094.5454545454554 },
-          { x: 8044.675324675325, y: 2079.4805194805203 },
-          { x: 8044.675324675325, y: 2064.4155844155857 },
-          { x: 8044.675324675325, y: 2049.3506493506497 },
-          { x: 8044.675324675325, y: 2034.285714285715 },
-          { x: 8044.675324675325, y: 2019.22077922078 },
-          { x: 8044.675324675325, y: 2004.155844155845 },
-        ],
-      },
-    },
-    {
-      id: 1677936457914,
-      type: "LINE",
-      meta: {
-        x1: 2982.857142857143,
-        y1: 3134.025974025975,
-        x2: 3781.298701298701,
-        y2: 3149.09090909091,
-      },
-    },
-    {
-      id: 1677936460580,
-      type: "ARROW_LINE",
-      meta: {
-        x1: 4368.831168831169,
-        y1: 3179.2207792207796,
-        x2: 5438.441558441558,
-        y2: 3179.2207792207796,
-      },
-    },
-    {
-      id: 1677936462476,
-      type: "POINT",
-      meta: { cx: 6462.857142857143, cy: 3103.896103896105 },
-    },
-  ]
-  // for (let i = 0; i < 1000; i++) {
-  //   let randomNumberA = Math.floor(Math.random() * 10000)
-  //   let randomNumberB = Math.floor(Math.random() * 10000)
-  //   let randomNumberC = Math.floor(Math.random() * 1000)
-  //   state.shapes.push({
-  //     id: i,
-  //     // type: "POINT",
-  //     // meta: { cx: 6462.857142857143, cy: 3103.896103896105 },
-  //     type: "RECT",
-  //     meta: {
-  //       x: randomNumberA,
-  //       y: randomNumberB,
-  //       width: randomNumberC,
-  //       height: randomNumberC,
-  //     },
-  //   })
-  // }
+  }
+  // 返回的 painter 是该 vue 组件的组件实例，你可以访问该组件实例上的 props、refs 等属性，当然，我也把该组件的 state 暴露给了你，以供你灵活的进行开发
+  state.painter = initPainter(painterConf)
+}
+// 初始化osd
+const initializeOsd = () => {
+  const tileSources =
+    "http://openseadragon.github.io/example-images/duomo/duomo.dzi"
   const osdConf = {
-    id: "osd", // 容器 dom Id
-    tileSources:
-      "http://openseadragon.github.io/example-images/duomo/duomo.dzi", // 瓦片源
-    // "http://192.168.100.147/image/yice-dev/1623950836958834688.sdpc.dzi", // 瓦片源
-    showNavigator: true, // 显示小地图
-    navigatorPosition: "TOP_LEFT", // 设置缩略图的位置
-    showNavigationControl: false, // 设置为false以防止出现默认导航控件。 注意，如果设置为false，由选项zoomInButton、zoomOutButton等设置的自定义按钮将呈现为非活动状态。
-    // animationTime: 0.3, // 动画过度时间
-    // defaultZoomLevel: 0, // 第一次打开图像或单击主页按钮时使用的缩放级别。 如果为0，则调整以适合查看器。
-    // maxZoomPixelRatio: 2, // 允许放大以影响最高级别像素比的最大比率。 这可以设置为Infinity，允许“无限”缩放图像，但如果HTML5 Canvas无法在查看设备上使用，这在视觉上就不那么有效了。
-    // minZoomLevel: 1, // 最小缩放等级
-    // maxZoomLevel: 80, // 最大缩放等级
-    zoomPerClick: 1.0, // 每次鼠标点击或触摸点击的“缩放距离”。 注意:将此设置为1.0将有效地禁用点击缩放功能
-    // visibilityRatio: 0.5, // 源图像必须保持在视口中的百分比(从0到1的数字)。 如果图像被拖动超过这个限制，它将“反弹”回来，直到达到最小的能见度比。 将其设置为0并将wrapHorizontal(或wrapVertical)设置为true将提供无限滚动视口的效果。
-    // wrapHorizontal: false, // 设置为true强制图像在视口中水平包装。 用于表示球体或圆柱体表面的地图或图像。
-    // zoomPerScroll: 1.2, // 滚轮缩放速度
-    // timeout: 120000, // 一个映像作业完成所需要的最大毫秒数。
-    navigatorAutoFade: false, // 自动隐藏小地图
-    // debugMode: false, // 调试模式
-    // debugGridColor: "#D95F02", // 调试模式网格颜色
-    // autoResize: true, // 设置为 false 以防止轮询查看器大小更改。对于提供自定义调整大小行为很有用。
-    // preserveImageSizeOnResize: true, // 设置为 true 以在调整查看器大小时保留图像大小。这需要 autoResize=true（默认）。
-    // minScrollDeltaTime: 50, // 画布滚动事件之间的毫秒数。此值有助于标准化不同设备之间的画布滚动事件的速率，从而使速度较快的设备减速到足以使缩放控制更易于管理。
+    ..._.cloneDeep(defaultOsdConf),
+    element: osdRef.value,
+    tileSources, // 瓦片源
   }
   state.viewer = new osd.Viewer(osdConf)
+}
+onMounted(async () => {
+  // 初始化osd
+  initializeOsd()
   state.viewer.addHandler("open", () => {
     // 初始化为 1 倍
     state.viewer.viewport.zoomTo(1)
-    // 秉承 vue 的思想，painter 的配置应该是响应式的数据，起码，最基本的 shapes（要渲染的形状数组） 应该是响应式的，如此一来，你可以直接操作 shapes 数组，进而画布上的形状会随之更新
-    const painterConf = {
-      viewer: state.viewer, // osd 查看器
-      shapes: state.shapes, // 需要渲染的形状
-      renderer: "canvas", // 渲染器：canvas or svg
-      // renderer: "svg", // 渲染器：canvas or svg
-      // 监听新增形状
-      onAdd: (shape) => {
-        state.shapes.push(shape)
-      },
-      // 监听删除形状
-      onRemove: (shape) => {
-        for (const i in state.shapes) {
-          if (state.shapes[i].id === shape.id) {
-            state.shapes.splice(i, 1)
-          }
-        }
-      },
-      // 监听更新形状
-      onUpdate: (shape) => {
-        for (const k in state.shapes) {
-          if (state.shapes[k].id === shape.id) {
-            state.shapes[k] = shape
-          }
-        }
-      },
-    }
-    // 返回的 painter 是该 vue 组件的组件实例，你可以访问该组件实例上的 props、refs 等属性，当然，我也把该组件的 state 暴露给了你，以供你灵活的进行开发
-    state.painter = initPainter(painterConf)
+    // 初始化 painter
+    initializePainter()
+    // 渲染默认的 shapes
+    state.shapes.push(..._.cloneDeep(defaultShapes))
   })
 })
 </script>
 
 <template>
   <div class="container">
-    <div id="osd" class="osd"></div>
-    <div v-if="state.painter" class="tools">
-      <div class="list">
-        <div>TOOLS：</div>
-        <label
-          v-for="(v, k) in state.painter.state.tools"
-          :key="k"
-          :for="k"
-          class="item"
-        >
-          <input
-            :id="k"
-            type="radio"
-            :value="k"
-            v-model="state.painter.state.mode"
-          />
-          {{ k }}
-        </label>
+    <div class="header">
+      <div class="left-title">
+        <img src="/favicon.ico" class="logo" />
+        <span>Vue Osd Painter</span>
+      </div>
+      <a
+        href="https://github.com/WT-SML/vue-osd-painter"
+        target="_blank"
+        class="github"
+      >
+        <svg role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <title>GitHub</title>
+          <path
+            d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
+          ></path>
+        </svg>
+      </a>
+    </div>
+    <div class="main">
+      <div class="tools">
+        <div v-if="state.painter" class="">
+          <div class="tools-list">
+            <div class="mode-title">模式：</div>
+            <label
+              v-for="(v, k) in state.painter.tools"
+              :key="k"
+              :for="k"
+              class="item"
+            >
+              <input
+                :id="k"
+                type="radio"
+                :value="k"
+                v-model="state.painter.state.mode"
+              />
+              {{ modeDescMap[k] || k }}
+            </label>
+          </div>
+          <div class="btns">
+            <button
+              class="btn"
+              v-if="!state.enormousAmountPointsMode"
+              @click="openEnormousAmountPointsMode()"
+            >
+              开启巨量点标注模式
+            </button>
+            <button
+              class="btn"
+              v-if="state.enormousAmountPointsMode"
+              @click="backToNormalMode()"
+            >
+              回到普通模式
+            </button>
+            <button
+              class="btn"
+              v-if="state.enormousAmountPointsMode"
+              @click="random10000Points()"
+            >
+              随机生成10000个点标注
+            </button>
+            <button class="btn" @click="clear()">清空画布</button>
+          </div>
+        </div>
+      </div>
+      <div ref="osdRef" class="osd"></div>
+    </div>
+    <div v-if="state.painter" class="debug">
+      <div class="debug-item" title="鼠标在视口中的位置">
+        鼠标坐标：（{{ state.painter.debug.mouseX }}，{{
+          state.painter.debug.mouseY
+        }}）
+      </div>
+      <div class="debug-item" title="鼠标在图像中的位置">
+        图像坐标：（{{
+          parseInt(state.painter.debug.dziCoordByMouse.value.x)
+        }}，{{ parseInt(state.painter.debug.dziCoordByMouse.value.y) }}）
+      </div>
+      <div class="debug-item" title="鼠标是否在画布内">
+        鼠标在画布内：{{
+          state.painter.debug.isMouseOutside.value ? "否" : "是"
+        }}
+      </div>
+      <div class="debug-item" title="鼠标是否在画布内按下左键">
+        鼠标左键按下：{{
+          state.painter.debug.isLeftMousePressed.value ? "是" : "否"
+        }}
+      </div>
+      <div class="debug-item" title="悬浮图形的ID">
+        悬浮图形ID：{{ state.painter.debug.hoverShape.value?.id ?? "-" }}
+      </div>
+      <div class="debug-item" title="悬浮编辑锚点的坐标">
+        悬浮编辑锚点：{{
+          state.painter.debug.hoverAnchor.value
+            ? `（${parseInt(
+                state.painter.debug.hoverAnchor.value.x
+              )}，${parseInt(state.painter.debug.hoverAnchor.value.y)}）`
+            : "-"
+        }}
+      </div>
+      <div class="debug-item" title="图形数量">
+        图形数量：{{ state.shapes.length }}
+      </div>
+      <div class="debug-item" title="是否开启巨量点标注模式">
+        巨量点标注模式：{{ state.enormousAmountPointsMode ? "开启" : "关闭" }}
       </div>
     </div>
   </div>
@@ -391,23 +238,99 @@ onMounted(async () => {
 
 <style lang="scss" scoped>
 .container {
-  height: 100%;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
   display: flex;
-}
-.osd {
-  width: 70%;
-  height: 100%;
-  border-right: 1px #ccc solid;
-}
-.tools {
-  width: 20%;
-  height: 100%;
-  padding: 10px;
-  .list {
-    border-right: 1px #ccc solid;
-    .item {
-      display: block;
+  flex-direction: column;
+  background-color: #fff;
+  .header {
+    height: 55px;
+    border-bottom: 1px solid #e2e2e3;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 50px;
+    font-weight: bold;
+    font-size: 18px;
+    color: #3c3c43;
+    flex-shrink: 0;
+    .left-title {
+      display: flex;
+      align-items: center;
+      .logo {
+        margin-right: 15px;
+        user-select: none;
+      }
+    }
+    .github {
+      width: 22px;
+      height: 22px;
       cursor: pointer;
+    }
+  }
+  .main {
+    flex-grow: 1;
+    display: flex;
+    .tools {
+      width: 300px;
+      flex-shrink: 0;
+      padding: 20px;
+      overflow: auto;
+      border-right: 1px solid #e2e2e3;
+      .mode-title {
+        margin-bottom: 5px;
+      }
+      .tools-list {
+        .item {
+          display: block;
+          cursor: pointer;
+          border: 1px solid #e2e2e3;
+          margin-bottom: 5px;
+          padding: 5px;
+          border-radius: 2px;
+          transition: all ease 0.3s;
+          &:hover {
+            background-color: #e9e9e9;
+          }
+        }
+      }
+      .btns {
+        margin-top: 20px;
+        .btn {
+          padding: 5px 0;
+          display: block;
+          width: 100%;
+          margin-bottom: 10px;
+          cursor: pointer;
+        }
+      }
+    }
+    .osd {
+      flex-grow: 1;
+    }
+  }
+  .debug {
+    height: 30px;
+    border-top: 1px solid #e2e2e3;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    font-size: 12px;
+    overflow: hidden;
+    -o-text-overflow: ellipsis;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    .debug-item {
+      height: 100%;
+      padding: 0 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      transition: all ease 0.3s;
+      &:hover {
+        background-color: #e9e9e9;
+      }
     }
   }
 }
@@ -423,6 +346,7 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background-color: #eee;
+  background-color: #fff;
+  font-size: 14px;
 }
 </style>
