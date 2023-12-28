@@ -1428,7 +1428,6 @@ watch(
       })
       state.shapesBounds.insert(getBounds(newItem))
     }
-    updateTransform()
   },
   {
     deep: true,
@@ -1447,22 +1446,6 @@ watch(
   },
   { deep: true }
 )
-// 监听hoverShape
-watch(
-  hoverShape,
-  () => {
-    updateTransform()
-  },
-  { deep: true }
-)
-// 监听临时shape
-watch(
-  () => state.tempShape,
-  () => {
-    updateTransform()
-  },
-  { deep: true }
-)
 // 监听绘图模式
 watch(
   () => state.mode,
@@ -1478,12 +1461,14 @@ watch(isLeftMousePressed, (newVal) => {
   } else {
     toolsMouseMap[state.mode].handleMouseUp()
   }
-  updateTransform()
 })
 // 监听鼠标位置
-watch([mouseX, mouseY], () => {
-  toolsMouseMap[state.mode].handleMouseMove()
-})
+watch(
+  [mouseX, mouseY],
+  _.throttle(() => {
+    toolsMouseMap[state.mode].handleMouseMove()
+  }, 20)
+)
 
 // 鼠标实时的画布坐标
 const dziCoordByMouse = computed(() =>
@@ -1499,15 +1484,6 @@ const computedShapes = computed(() => {
   }
   return props.shapes
 })
-
-// 监听 viewer 事件
-const listenForViewerEvents = () => {
-  const viewer = props.viewer
-  viewer.addHandler("animation", () => updateTransform())
-  viewer.addHandler("rotate", () => updateTransform())
-  viewer.addHandler("resize", () => updateTransform())
-  viewer.addHandler("flip", () => updateTransform())
-}
 
 // 获取比例
 const getScale = () => {
@@ -1538,6 +1514,7 @@ const updateTransform = () => {
   if (isCanvas.value) {
     render()
   }
+  requestAnimationFrame(updateTransform)
 }
 const pointsToPath2D = (points, isClose = false) => {
   const path = new Path2D()
@@ -1650,10 +1627,9 @@ const drawShape = (ctx, shape, isAdd = false) => {
     ctx.stroke(pointsToPath2D(points))
     ctx.stroke(pointsToPath2D(getArrowPathForCanvas(shape, state.scale)))
   } else if (shape.type === state.tools.POINT) {
-    const { cx, cy } = shape.meta
     // 点
+    const { cx, cy } = shape.meta
     if (isEnormousAmountPointsMode.value) {
-      // 如果是巨量点标注模式
       const width = Math.floor((anchorRadius * 2) / state.scale)
       const height = Math.floor((anchorRadius * 2) / state.scale)
       ctx.fillRect(
@@ -1693,6 +1669,16 @@ const drawEditAnchors = (ctx) => {
     ctx.fill()
   }
 }
+// dzi坐标转实际坐标（单个点）
+const dziCoordToViewportCoord = (point) => {
+  return props.viewer.viewport.imageToViewerElementCoordinates(
+    new osd.Point(point.x, point.y)
+  )
+}
+// dzi坐标转实际坐标(多个点)
+const dziCoordsToViewportCoords = (points) => {
+  return points.map((point) => dziCoordToViewportCoord(point))
+}
 // canvas 渲染
 const render = () => {
   const viewer = props.viewer
@@ -1701,7 +1687,7 @@ const render = () => {
   if (!canvas) {
     return
   }
-  const viewportContainerSize = viewer.viewport.getContainerSize()
+  const viewportContainerSize = viewport.getContainerSize()
   const canvasWidth = viewportContainerSize.x
   const canvasHeight = viewportContainerSize.y
   canvas.width = canvasWidth
@@ -1713,8 +1699,31 @@ const render = () => {
   const scaleX = flipped ? -scaleY : scaleY
   ctx.scale(scaleY, scaleX)
   ctx.translate(-state.canvasTranslate.x, -state.canvasTranslate.y)
+  // 当前视口转成dzi坐标
+  const viewportLeftTopPoint = viewport.viewerElementToImageCoordinates(
+    new osd.Point(0, 0)
+  )
+  const viewportRightBottomPoint = viewport.viewerElementToImageCoordinates(
+    viewportContainerSize
+  )
+  const viewportTempShape = {
+    type: "RECT",
+    meta: {
+      x: viewportLeftTopPoint.x,
+      y: viewportLeftTopPoint.y,
+      width: viewportRightBottomPoint.x - viewportLeftTopPoint.x,
+      height: viewportRightBottomPoint.y - viewportLeftTopPoint.y,
+    },
+  }
   // 渲染普通形状
   for (const shape of computedShapes.value) {
+    if (shape.type === state.tools.POINT) {
+      if (
+        !pointInShape({ x: shape.meta.cx, y: shape.meta.cy }, viewportTempShape)
+      ) {
+        continue
+      }
+    }
     drawShape(ctx, shape)
   }
   // 渲染新增形状
@@ -1787,7 +1796,6 @@ const handleContextmenu = (e) => {
 // 挂载
 onMounted(() => {
   updateTransform()
-  listenForViewerEvents()
   // 创建一个鼠标跟踪器
   const tracker = new osd.MouseTracker({
     element: isCanvas.value ? canvasRef.value : svgRef.value,
@@ -2249,6 +2257,7 @@ defineExpose({
   top: 0;
   left: 0;
   user-select: none;
+  transform: translateZ(0);
 }
 .painter {
   position: absolute;

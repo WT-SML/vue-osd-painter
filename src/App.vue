@@ -49,7 +49,7 @@ const openEnormousAmountPointsMode = () => {
 // 随机生成10000个点标注
 const random10000Points = () => {
   clear()
-  const points = randomPoints(state.viewer, 1000)
+  const points = randomPoints(state.viewer, 10000)
   state.shapes.push(...points)
 }
 // 回到普通模式
