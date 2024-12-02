@@ -7,6 +7,9 @@ import { defaultShapes } from "./tools/default-shapes"
 import { defaultOsdConf } from "./tools/default-osd-conf"
 import { randomPoints } from "./tools"
 import _ from "lodash"
+import { useFps } from "@vueuse/core"
+
+const fps = useFps()
 
 const osdRef = ref(null) // osd dom
 
@@ -233,6 +236,7 @@ onMounted(async () => {
         巨量点标注模式：{{ state.enormousAmountPointsMode ? "开启" : "关闭" }}
       </div>
     </div>
+    <div class="fps">FPS:{{ fps }}</div>
   </div>
 </template>
 
@@ -332,6 +336,16 @@ onMounted(async () => {
         background-color: #e9e9e9;
       }
     }
+  }
+  .fps {
+    position: fixed;
+    top: 0;
+    left: 0;
+    background-color: #000;
+    color: #fff;
+    font-size: 12px;
+    padding: 5px;
+    width: 45px;
   }
 }
 </style>

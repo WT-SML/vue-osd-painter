@@ -20,6 +20,11 @@ import { lineAngle, pointRotate, pointInPolygon, lineLength } from "geometric"
 import RBush from "rbush"
 import _ from "lodash"
 
+import { App, Rect, Group, Leafer, ZoomEvent } from "leafer-ui"
+import { Editor } from "@leafer-in/editor" // 导入图形编辑器插件
+
+import { Application, Container, Graphics, Text } from "pixi.js"
+
 const props = defineProps({
   viewer: Object, // osd 查看器
   shapes: Array, // 图形列表 支持响应式
@@ -530,6 +535,9 @@ const state = reactive({
   shapesBounds, // 形状数组对应边界的映射
   translate: null, // svg的平移（基于视口）
   canvasTranslate: null, // canvas的平移（基于dzi）
+  leafer: null,
+  zoomLayer: null,
+  rects: [],
 })
 
 let lastMouseDownTimestamp = 0 // 多边形工具下判断双击完成形状的时间戳
@@ -1514,6 +1522,14 @@ const updateTransform = () => {
   if (isCanvas.value) {
     render()
   }
+  // const center = { x: 0, y: 0 }
+  // state.zoomLayer.reset()
+  // state.zoomLayer.moveWorld(-state.canvasTranslate.x, -state.canvasTranslate.y)
+  // state.zoomLayer.scaleOfWorld(center, scaleY)
+  // const strokeWidth = lineWidth / state.scale
+  // for (const v of state.rects) {
+  //   v.setAttr("strokeWidth", strokeWidth)
+  // }
   requestAnimationFrame(updateTransform)
 }
 const pointsToPath2D = (points, isClose = false) => {
@@ -1795,7 +1811,6 @@ const handleContextmenu = (e) => {
 }
 // 挂载
 onMounted(() => {
-  updateTransform()
   // 创建一个鼠标跟踪器
   const tracker = new osd.MouseTracker({
     element: isCanvas.value ? canvasRef.value : svgRef.value,
@@ -1812,6 +1827,95 @@ onMounted(() => {
   })
   // 启用鼠标跟踪器
   tracker.setTracking(true)
+
+  // const viewer = props.viewer
+  // const width = viewer.viewport.getContainerSize().x
+  // const height = viewer.viewport.getContainerSize().y
+  // const leafer = new Leafer({
+  //   view: document.getElementsByClassName("osd")[0],
+  //   width,
+  //   height,
+  //   hittable: false,
+  //   // type: "custom",
+  // })
+  // const zoomLayer = new Group()
+  // leafer.add(zoomLayer)
+  // const count = 1000
+  // const rects = []
+  // for (let i = 0; i < count; i++) {
+  //   const x = Math.random() * 10000
+  //   const y = Math.random() * 10000
+  //   const rect = new Rect({ x, y, stroke: "#f00" })
+  //   zoomLayer.add(rect)
+  //   rects.push(rect)
+  // }
+  // state.leafer = leafer
+  // state.zoomLayer = zoomLayer
+  // state.rects = rects
+  // const center = { x: 0, y: 0 }
+  ;(async () => {
+    // Create and initialize a new PixiJS application
+    const osdDom = document.getElementsByClassName("osd")[0]
+    const app = new Application()
+    await app.init({ resizeTo: osdDom, backgroundAlpha: 0 })
+    osdDom.appendChild(app.canvas)
+    app.canvas.style.pointerEvents = "none"
+    app.canvas.style.position = "absolute"
+    app.canvas.style.top = "0"
+    app.canvas.style.left = "0"
+    // Create a container to hold both grids
+    const container = new Container({})
+    const graphics = new Graphics()
+    // 渲染100个矩形
+    const rects = []
+    for (let i = 0; i < 100; i++) {
+      const x = Math.random() * 10000
+      const y = Math.random() * 10000
+      const rect = { x, y, w: 100, h: 100 }
+      rects.push(rect)
+      graphics.rect(rect.x, rect.y, rect.w, rect.h)
+    }
+    graphics.stroke({ width: 2, color: 0xff0000, pixelLine: true })
+    // 渲染100个矩形 END
+    // 渲染10000个点
+    const points = []
+    for (let i = 0; i < 100000; i++) {
+      const x = Math.random() * 10000
+      const y = Math.random() * 10000
+      const point = { x, y }
+      points.push(point)
+      graphics.circle(point.x, point.y, 5)
+      graphics.fill(0x650a5a, 1)
+      graphics.stroke({ width: 2, color: 0xfeeb77 })
+    }
+    graphics.stroke({ width: 2, color: 0xff0000, pixelLine: true })
+    // 渲染100000个点END
+    app.stage.addChild(graphics)
+    // Add animation to scale the grids over time
+    app.ticker.add(() => {
+      const viewport = props.viewer.viewport
+      const flipped = viewport.getFlip()
+      const p = viewport.pixelFromPoint(new osd.Point(0, 0), true)
+      if (flipped) {
+        p.x = viewport._containerInnerSize.x - p.x
+      }
+      const scaleY = getScale()
+      const scaleX = flipped ? -scaleY : scaleY
+      const rotation = viewport.getRotation()
+      state.scale = scaleY
+      state.translate = p
+      const canvasP = props.viewer.viewport.viewerElementToImageCoordinates(
+        new osd.Point(0, 0)
+      )
+      graphics.x = p.x
+      graphics.y = p.y
+      graphics.scale = scaleY
+      const strokeWidth = 2 / state.scale
+      // graphics.stroke({ width: strokeWidth, color: 0xff0000 })
+    })
+  })()
+
+  // updateTransform()
 })
 // 卸载
 onUnmounted(() => {})
